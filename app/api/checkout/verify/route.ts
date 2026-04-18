@@ -1,10 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import {
-  checkoutSessionPayerEmail,
-  checkoutSessionPayerName,
-} from "@/lib/stripe-checkout";
+import { activateUserFromCheckoutSession } from "@/lib/checkout-activation";
 import { getStripe } from "@/lib/stripe";
-import { upsertPaidSessionRecord } from "@/lib/repositories/paid-session";
 
 export async function GET(request: NextRequest) {
   try {
@@ -19,28 +15,19 @@ export async function GET(request: NextRequest) {
     const session = await stripe.checkout.sessions.retrieve(sessionId);
 
     const paid = session.payment_status === "paid";
-    const payerEmail = checkoutSessionPayerEmail(session);
-    const payerName = checkoutSessionPayerName(session);
+    let accountStatus: "active" | "pending" | "unpaid" = "unpaid";
 
     if (paid) {
-      await upsertPaidSessionRecord({
-        stripeSessionId: session.id,
-        payerEmail,
-        payerName,
-        paymentStatus: session.payment_status,
-        amountTotal: session.amount_total,
-        currency: session.currency?.toUpperCase() ?? null,
-      });
+      const user = await activateUserFromCheckoutSession(session);
+      accountStatus = user?.status === "active" ? "active" : "pending";
     }
 
     return NextResponse.json({
       paid,
       paymentStatus: session.payment_status,
       sessionId: session.id,
-      prefillEmail: payerEmail ?? "",
-      prefillName: payerName ?? "",
-      /** Si Stripe aportó email, el formulario debe usar el mismo (también validado en /api/auth/activate). */
-      emailFromStripe: Boolean(payerEmail),
+      /** "active" = cuenta ya disponible; "pending" = pago OK pero activación en curso; "unpaid" = aún no pagado. */
+      accountStatus,
     });
   } catch (e) {
     console.error(e);

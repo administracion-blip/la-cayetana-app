@@ -9,6 +9,7 @@ export default async function CardPage() {
   if (!session) redirect("/login");
   const user = await getUserById(session.sub);
   if (!user) redirect("/login");
+  if (user.status !== "active" || !user.membershipId) redirect("/login?error=inactive");
 
   return (
     <div className="flex flex-col items-center">

@@ -36,7 +36,7 @@ export default async function ProfilePage() {
           <dt className="text-xs font-medium uppercase tracking-wide text-muted">
             Número de socio
           </dt>
-          <dd className="mt-1 font-mono text-lg">{user.membershipId}</dd>
+          <dd className="mt-1 font-mono text-lg">{user.membershipId ?? "—"}</dd>
         </div>
         <div>
           <dt className="text-xs font-medium uppercase tracking-wide text-muted">

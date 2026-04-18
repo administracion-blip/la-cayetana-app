@@ -1,6 +1,5 @@
 import Link from "next/link";
 import { Logo } from "@/components/brand/Logo";
-import { StartCheckoutButton } from "@/components/checkout/StartCheckoutButton";
 
 type Props = {
   searchParams: Promise<{ canceled?: string }>;
@@ -44,7 +43,12 @@ export default async function Home({ searchParams }: Props) {
         Regístrate, paga online y obtén tu carnet digital para mostrarlo en taquilla y acceder a descuentos exclusivos.
         </p>
 
-        <StartCheckoutButton />
+        <Link
+          href="/registro"
+          className="inline-flex min-h-12 min-w-[220px] items-center justify-center rounded-full bg-brand px-8 text-[15px] font-medium text-white transition hover:bg-brand-hover"
+        >
+          Consigue tu carnet
+        </Link>
 
         <p className="mt-10 max-w-sm text-xs text-muted">
         Si necesitas más información, no dudes en contactarnos en lacayetanagranada@gmail.com

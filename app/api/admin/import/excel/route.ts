@@ -56,7 +56,9 @@ export async function POST(request: Request) {
 
     const allUsers = await listUsers();
     const byMembershipId = new Map(
-      allUsers.map((u) => [u.membershipId.trim().toUpperCase(), u]),
+      allUsers
+        .filter((u) => !!u.membershipId)
+        .map((u) => [u.membershipId!.trim().toUpperCase(), u]),
     );
 
     let updated = 0;

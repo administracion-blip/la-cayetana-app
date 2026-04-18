@@ -110,7 +110,7 @@ async function main() {
               stripePaymentStatus: "paid",
               createdAt: now,
               exportedToAgora: false,
-              ...(seedAsAdmin ? { isAdmin: true } : {}),
+              ...(seedAsAdmin ? { isAdmin: true } : { isAdmin: false }),
             },
             ConditionExpression: "attribute_not_exists(id)",
           },

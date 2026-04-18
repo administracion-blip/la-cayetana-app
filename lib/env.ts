@@ -7,7 +7,17 @@ const schema = z.object({
   STRIPE_SECRET_KEY: z.string().min(1),
   STRIPE_WEBHOOK_SECRET: z.string().min(1),
   NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: z.string().min(1),
-  STRIPE_PRICE_ID: z.string().min(1),
+  /**
+   * Stripe Payment Link estático (se configura producto y precio en el dashboard).
+   * Ejemplo: https://buy.stripe.com/xxxxxxxx. El backend le añade
+   * client_reference_id y prefilled_email por query string.
+   */
+  NEXT_PUBLIC_STRIPE_PAYMENT_LINK: z
+    .string()
+    .url()
+    .refine((v) => v.startsWith("https://buy.stripe.com/"), {
+      message: "Debe ser un Payment Link de Stripe (https://buy.stripe.com/...)",
+    }),
   SESSION_SECRET: z.string().min(32),
   NEXT_PUBLIC_APP_URL: z.string().url(),
   /** Email verificado en SES (From). Vacío o ausente = sin envío (solo log del enlace en servidor). */

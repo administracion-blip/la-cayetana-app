@@ -1,0 +1,358 @@
+"use client";
+
+import { useMemo, useState } from "react";
+import { MAX_BIRTH_YEAR, MIN_BIRTH_YEAR } from "@/lib/validation";
+
+const SEX_OPTIONS: { value: "male" | "female" | "prefer_not_to_say"; label: string }[] = [
+  { value: "male", label: "Hombre" },
+  { value: "female", label: "Mujer" },
+  { value: "prefer_not_to_say", label: "Prefiero no decirlo" },
+];
+
+function EyeIcon({ open }: { open: boolean }) {
+  return open ? (
+    <svg
+      width="20"
+      height="20"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  ) : (
+    <svg
+      width="20"
+      height="20"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M17.94 17.94A10.06 10.06 0 0 1 12 19c-6.5 0-10-7-10-7a17.54 17.54 0 0 1 4.06-4.94" />
+      <path d="M9.88 5.08A10.42 10.42 0 0 1 12 5c6.5 0 10 7 10 7a17.6 17.6 0 0 1-3.23 4.3" />
+      <path d="M10.58 10.58a2 2 0 0 0 2.83 2.83" />
+      <line x1="3" y1="3" x2="21" y2="21" />
+    </svg>
+  );
+}
+
+export function RegistrationForm() {
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
+  const [sex, setSex] = useState<"" | "male" | "female" | "prefer_not_to_say">("");
+  const [birthYear, setBirthYear] = useState<string>("");
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [acceptTerms, setAcceptTerms] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const passwordsMismatch =
+    confirmPassword.length > 0 && password !== confirmPassword;
+
+  const years = useMemo(
+    () =>
+      Array.from(
+        { length: MAX_BIRTH_YEAR - MIN_BIRTH_YEAR + 1 },
+        (_, i) => MAX_BIRTH_YEAR - i,
+      ),
+    [],
+  );
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+
+    if (!name.trim()) {
+      setError("Introduce tu nombre completo");
+      return;
+    }
+    if (!phone.trim()) {
+      setError("Introduce un teléfono de contacto");
+      return;
+    }
+    if (!sex) {
+      setError("Selecciona una opción en «Sexo»");
+      return;
+    }
+    if (!birthYear) {
+      setError("Selecciona tu año de nacimiento");
+      return;
+    }
+    if (password.length < 8) {
+      setError("La contraseña debe tener al menos 8 caracteres");
+      return;
+    }
+    if (password !== confirmPassword) {
+      // El aviso se muestra inline bajo «Confirmar contraseña».
+      return;
+    }
+    if (!acceptTerms) {
+      setError("Debes aceptar las condiciones para continuar");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const res = await fetch("/api/registration/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name,
+          email,
+          phone,
+          sex,
+          birthYear: Number(birthYear),
+          password,
+          confirmPassword,
+          acceptTerms,
+        }),
+      });
+      const data = (await res.json()) as {
+        url?: string;
+        error?: string;
+        renewal?: boolean;
+        alreadyPaid?: boolean;
+        membershipId?: string | null;
+      };
+      if (!res.ok || !data.url) {
+        setError(data.error ?? "No se pudo iniciar el registro");
+        return;
+      }
+      window.location.href = data.url;
+    } catch {
+      setError("Error de red. Inténtalo de nuevo.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <form
+      onSubmit={onSubmit}
+      className="mx-auto flex w-full max-w-md flex-col gap-4 rounded-2xl border border-border bg-card p-8 shadow-sm"
+    >
+      <div>
+        <label className="mb-1 block text-sm font-semibold text-foreground" htmlFor="name">
+          Nombre completo
+        </label>
+        <input
+          id="name"
+          name="name"
+          required
+          autoComplete="name"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          className="w-full rounded-xl border border-border bg-background px-4 py-3 text-[15px] outline-none ring-brand focus:ring-2"
+        />
+      </div>
+      <div>
+        <label className="mb-1 block text-sm font-semibold text-foreground" htmlFor="email">
+          Email
+        </label>
+        <input
+          id="email"
+          name="email"
+          type="email"
+          autoComplete="email"
+          required
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          className="w-full rounded-xl border border-border bg-background px-4 py-3 text-[15px] outline-none ring-brand focus:ring-2"
+        />
+      </div>
+      <div>
+        <label className="mb-1 block text-sm font-semibold text-foreground" htmlFor="phone">
+          Teléfono
+        </label>
+        <input
+          id="phone"
+          name="phone"
+          type="tel"
+          autoComplete="tel"
+          required
+          minLength={6}
+          value={phone}
+          onChange={(e) => setPhone(e.target.value)}
+          className="w-full rounded-xl border border-border bg-background px-4 py-3 text-[15px] outline-none ring-brand focus:ring-2"
+        />
+      </div>
+      <div>
+        <label className="mb-1 block text-sm font-semibold text-foreground" htmlFor="sex">
+          Sexo
+        </label>
+        <select
+          id="sex"
+          name="sex"
+          required
+          value={sex}
+          onChange={(e) =>
+            setSex(
+              e.target.value as "" | "male" | "female" | "prefer_not_to_say",
+            )
+          }
+          className="w-full rounded-xl border border-border bg-background px-4 py-3 text-[15px] outline-none ring-brand focus:ring-2"
+        >
+          <option value="" disabled>
+            Selecciona una opción…
+          </option>
+          {SEX_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div>
+        <label className="mb-1 block text-sm font-semibold text-foreground" htmlFor="birthYear">
+          Año de nacimiento
+        </label>
+        <select
+          id="birthYear"
+          name="birthYear"
+          required
+          value={birthYear}
+          onChange={(e) => setBirthYear(e.target.value)}
+          className="w-full rounded-xl border border-border bg-background px-4 py-3 text-[15px] outline-none ring-brand focus:ring-2"
+        >
+          <option value="" disabled>
+            Selecciona el año…
+          </option>
+          {years.map((y) => (
+            <option key={y} value={y}>
+              {y}
+            </option>
+          ))}
+        </select>
+        <p className="mt-1 text-xs text-muted">
+          Debes ser mayor de 18 años.
+        </p>
+      </div>
+      <div>
+        <label className="mb-1 block text-sm font-semibold text-foreground" htmlFor="password">
+          Contraseña (mín. 8 caracteres)
+        </label>
+        <div className="relative">
+          <input
+            id="password"
+            name="password"
+            type={showPassword ? "text" : "password"}
+            autoComplete="new-password"
+            required
+            minLength={8}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            className="w-full rounded-xl border border-border bg-background px-4 py-3 pr-12 text-[15px] outline-none ring-brand focus:ring-2"
+          />
+          <button
+            type="button"
+            onClick={() => setShowPassword((v) => !v)}
+            aria-label={
+              showPassword ? "Ocultar contraseña" : "Mostrar contraseña"
+            }
+            aria-pressed={showPassword}
+            className="absolute inset-y-0 right-0 flex w-12 items-center justify-center text-zinc-400 transition hover:text-zinc-600"
+            tabIndex={-1}
+          >
+            <EyeIcon open={showPassword} />
+          </button>
+        </div>
+      </div>
+      <div>
+        <label
+          className="mb-1 block text-sm font-semibold text-foreground"
+          htmlFor="confirmPassword"
+        >
+          Confirmar contraseña
+        </label>
+        <div className="relative">
+          <input
+            id="confirmPassword"
+            name="confirmPassword"
+            type={showConfirmPassword ? "text" : "password"}
+            autoComplete="new-password"
+            required
+            minLength={8}
+            value={confirmPassword}
+            onChange={(e) => setConfirmPassword(e.target.value)}
+            aria-invalid={passwordsMismatch || undefined}
+            aria-describedby={
+              passwordsMismatch ? "confirmPassword-error" : undefined
+            }
+            className={`w-full rounded-xl border bg-background px-4 py-3 pr-12 text-[15px] outline-none focus:ring-2 ${
+              passwordsMismatch
+                ? "border-red-300 ring-red-300"
+                : "border-border ring-brand"
+            }`}
+          />
+          <button
+            type="button"
+            onClick={() => setShowConfirmPassword((v) => !v)}
+            aria-label={
+              showConfirmPassword
+                ? "Ocultar contraseña"
+                : "Mostrar contraseña"
+            }
+            aria-pressed={showConfirmPassword}
+            className="absolute inset-y-0 right-0 flex w-12 items-center justify-center text-zinc-400 transition hover:text-zinc-600"
+            tabIndex={-1}
+          >
+            <EyeIcon open={showConfirmPassword} />
+          </button>
+        </div>
+        {passwordsMismatch ? (
+          <p
+            id="confirmPassword-error"
+            role="alert"
+            className="mt-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
+          >
+            Las contraseñas no coinciden.
+          </p>
+        ) : null}
+      </div>
+      <label className="flex items-start gap-2 text-sm text-muted">
+        <input
+          type="checkbox"
+          checked={acceptTerms}
+          onChange={(e) => setAcceptTerms(e.target.checked)}
+          required
+          className="mt-1 h-4 w-4 accent-brand"
+        />
+        <span>
+          He leído y acepto las condiciones de uso y la política de privacidad.
+        </span>
+      </label>
+
+      {error ? (
+        <p className="text-sm text-red-600" role="alert">
+          {error}
+        </p>
+      ) : null}
+
+      <button
+        type="submit"
+        disabled={loading}
+        className="mt-2 rounded-full bg-brand py-3 text-[15px] font-medium text-white hover:bg-brand-hover disabled:opacity-60"
+      >
+        {loading ? "Preparando pago…" : "Continuar al pago"}
+      </button>
+      <p className="text-center text-xs text-muted">
+        Solo se creará tu cuenta si el pago se realiza con éxito. Si ya eres
+        socio, introduce tu mismo email para renovar tu bono manteniendo tu
+        número de carnet.
+      </p>
+    </form>
+  );
+}

@@ -7,7 +7,14 @@ export const SOCIO_EXCEL_COLUMNS = [
   "name",
   "email",
   "phone",
+  "sex",
+  "birthYear",
   "status",
+  "paidAmountCents",
+  "paidAmountEuros",
+  "paidAt",
+  "deliveryStatus",
+  "deliveredAt",
   "createdAt",
   "exportedToAgora",
   "isAdmin",
@@ -17,14 +24,28 @@ export type SocioExcelRow = Partial<
   Record<(typeof SOCIO_EXCEL_COLUMNS)[number], unknown>
 >;
 
-export function userRecordToExcelRow(u: UserRecord): Record<string, string | boolean> {
+function centsToEurosString(cents: number | undefined | null): string {
+  if (typeof cents !== "number" || Number.isNaN(cents)) return "";
+  return (cents / 100).toFixed(2);
+}
+
+export function userRecordToExcelRow(
+  u: UserRecord,
+): Record<string, string | number | boolean> {
   return {
-    membershipId: u.membershipId,
+    membershipId: u.membershipId ?? "",
     id: u.id,
     name: u.name,
     email: u.email,
     phone: u.phone ?? "",
+    sex: u.sex ?? "",
+    birthYear: u.birthYear ?? "",
     status: u.status,
+    paidAmountCents: typeof u.paidAmount === "number" ? u.paidAmount : "",
+    paidAmountEuros: centsToEurosString(u.paidAmount),
+    paidAt: u.paidAt ?? "",
+    deliveryStatus: u.status === "active" ? u.deliveryStatus ?? "pending" : "",
+    deliveredAt: u.deliveredAt ?? "",
     createdAt: u.createdAt,
     exportedToAgora: u.exportedToAgora,
     isAdmin: u.isAdmin === true,

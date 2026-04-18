@@ -48,7 +48,9 @@ export async function POST(request: Request) {
       return redirectTo(request, "/login?error=invalid");
     }
 
-    const ok = await verifyPassword(password, user.passwordHash);
+    const ok = user.passwordHash
+      ? await verifyPassword(password, user.passwordHash)
+      : false;
     if (!ok) {
       if (asJson) {
         return NextResponse.json(

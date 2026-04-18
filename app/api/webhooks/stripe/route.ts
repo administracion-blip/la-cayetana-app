@@ -1,11 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import type Stripe from "stripe";
+import { activateUserFromCheckoutSession } from "@/lib/checkout-activation";
 import { getEnv } from "@/lib/env";
-import { upsertPaidSessionRecord } from "@/lib/repositories/paid-session";
-import {
-  checkoutSessionPayerEmail,
-  checkoutSessionPayerName,
-} from "@/lib/stripe-checkout";
 import { getStripe } from "@/lib/stripe";
 
 export const runtime = "nodejs";
@@ -24,21 +20,15 @@ export async function POST(request: NextRequest) {
       sig,
       env.STRIPE_WEBHOOK_SECRET,
     );
+
     if (event.type === "checkout.session.completed") {
       const session = event.data.object as Stripe.Checkout.Session;
       if (session.payment_status === "paid") {
         try {
           const full = await stripe.checkout.sessions.retrieve(session.id);
-          await upsertPaidSessionRecord({
-            stripeSessionId: full.id,
-            payerEmail: checkoutSessionPayerEmail(full),
-            payerName: checkoutSessionPayerName(full),
-            paymentStatus: full.payment_status,
-            amountTotal: full.amount_total,
-            currency: full.currency?.toUpperCase() ?? null,
-          });
+          await activateUserFromCheckoutSession(full);
         } catch (e) {
-          console.error("[stripe webhook] paid_session upsert failed", e);
+          console.error("[stripe webhook] activación fallida", session.id, e);
         }
       }
       console.info(

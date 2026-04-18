@@ -3,6 +3,8 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
+type ImportMode = "admin" | "legacy";
+
 export function AdminExcelActions() {
   const router = useRouter();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -11,6 +13,7 @@ export function AdminExcelActions() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [mode, setMode] = useState<ImportMode>("admin");
 
   useEffect(() => {
     if (!open) return;
@@ -42,10 +45,15 @@ export function AdminExcelActions() {
     setMessage(null);
     setError(null);
 
+    const endpoint =
+      mode === "legacy"
+        ? "/api/admin/import/legacy/excel"
+        : "/api/admin/import/excel";
+
     try {
       const form = new FormData();
       form.set("file", file);
-      const res = await fetch("/api/admin/import/excel", {
+      const res = await fetch(endpoint, {
         method: "POST",
         body: form,
       });
@@ -54,6 +62,7 @@ export function AdminExcelActions() {
         error?: string;
         message?: string;
         updated?: number;
+        created?: number;
         errors?: { row: number; message: string }[];
       };
 
@@ -82,9 +91,11 @@ export function AdminExcelActions() {
     }
   }
 
-  function startImport() {
+  function startImport(nextMode: ImportMode) {
+    setMode(nextMode);
     setOpen(false);
-    inputRef.current?.click();
+    // Forzamos que el cambio de `mode` esté aplicado antes del click.
+    setTimeout(() => inputRef.current?.click(), 0);
   }
 
   return (
@@ -148,9 +159,20 @@ export function AdminExcelActions() {
               role="menuitem"
               disabled={busy}
               className="block w-full px-4 py-2.5 text-left text-sm hover:bg-zinc-50 disabled:opacity-60"
-              onClick={startImport}
+              onClick={() => startImport("admin")}
             >
               Importar desde Excel
+            </button>
+            <div className="my-1 border-t border-border" />
+            <button
+              type="button"
+              role="menuitem"
+              disabled={busy}
+              className="block w-full px-4 py-2.5 text-left text-sm hover:bg-zinc-50 disabled:opacity-60"
+              onClick={() => startImport("legacy")}
+              title="Alta masiva de socios anteriores (CY0001–CY0999)"
+            >
+              Importar socios anteriores (legacy)
             </button>
           </div>
         ) : null}
