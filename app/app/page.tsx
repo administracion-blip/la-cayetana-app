@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { RenewButton } from "@/components/app/RenewButton";
 import { EventFeedList } from "@/components/feed/EventFeedList";
 import { FeedAutoRefresh } from "@/components/feed/FeedAutoRefresh";
+import { ProgramacionPopupHost } from "@/components/feed/ProgramacionPopupHost";
 import { getSessionFromCookies } from "@/lib/auth/session";
 import { listPublishedEvents } from "@/lib/repositories/programacion";
 import { canRenewThisYear, getUserById } from "@/lib/repositories/users";
@@ -31,6 +32,7 @@ export default async function FeedPage() {
       ) : null}
       <EventFeedList events={events} />
       <FeedAutoRefresh />
+      <ProgramacionPopupHost />
     </div>
   );
 }

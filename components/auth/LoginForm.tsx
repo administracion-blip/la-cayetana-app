@@ -32,6 +32,13 @@ export function LoginForm({ initialError, successMessage }: Props) {
         setError(data.error ?? "No se pudo iniciar sesión");
         return;
       }
+      // Señal efímera para forzar al host del pop up de programación a saltar
+      // al entrar en /app, saltándose el cooldown de 1 h una única vez.
+      try {
+        sessionStorage.setItem("programacion_popup_force", "1");
+      } catch {
+        // sessionStorage puede no estar disponible; no es crítico
+      }
       router.push("/app");
       router.refresh();
     } catch {

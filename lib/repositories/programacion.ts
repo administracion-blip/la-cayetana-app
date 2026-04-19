@@ -29,6 +29,7 @@ export type CreateEventInput = {
   imageKey: string;
   imageContentType?: string;
   published: boolean;
+  showAsPopup?: boolean;
   createdByUserId: string;
 };
 
@@ -47,6 +48,7 @@ export async function createEvent(
     imageKey: input.imageKey,
     imageContentType: input.imageContentType,
     published: input.published,
+    showAsPopup: input.showAsPopup ?? false,
     createdAt: now,
     updatedAt: now,
     createdByUserId: input.createdByUserId,
@@ -82,6 +84,7 @@ export type UpdateEventInput = {
   imageKey?: string;
   imageContentType?: string;
   published?: boolean;
+  showAsPopup?: boolean;
   updatedByUserId: string;
 };
 
@@ -115,6 +118,7 @@ export async function updateEvent(
   add("imageKey", patch.imageKey);
   add("imageContentType", patch.imageContentType);
   add("published", patch.published);
+  add("showAsPopup", patch.showAsPopup);
 
   const res = await doc.send(
     new UpdateCommand({
@@ -272,4 +276,42 @@ export async function listPublishedEvents(): Promise<EventRecord[]> {
     events.sort((a, b) => a.startAt.localeCompare(b.startAt));
     return events;
   }
+}
+
+/**
+ * Lista los eventos marcados como pop up (`published === true` y
+ * `showAsPopup === true`) sin filtro de fecha. El orden es ascendente por
+ * `startAt`: primero los más próximos en el tiempo. Se usa un Scan con filtro
+ * porque el conjunto es pequeño y no necesitamos el GSI para este caso.
+ */
+export async function listPublishedPopupEvents(): Promise<EventRecord[]> {
+  const doc = getDocClient();
+  const { PROGRAMACION_TABLE_NAME } = getEnv();
+  const events: EventRecord[] = [];
+  let sk: Record<string, unknown> | undefined;
+  do {
+    const res = await doc.send(
+      new ScanCommand({
+        TableName: PROGRAMACION_TABLE_NAME,
+        FilterExpression:
+          "#et = :et AND #p = :true AND #pop = :true",
+        ExpressionAttributeNames: {
+          "#et": "entityType",
+          "#p": "published",
+          "#pop": "showAsPopup",
+        },
+        ExpressionAttributeValues: {
+          ":et": EVENT_ENTITY_TYPE,
+          ":true": true,
+        },
+        ExclusiveStartKey: sk,
+      }),
+    );
+    for (const item of res.Items ?? []) {
+      events.push(item as EventRecord);
+    }
+    sk = res.LastEvaluatedKey as Record<string, unknown> | undefined;
+  } while (sk);
+  events.sort((a, b) => a.startAt.localeCompare(b.startAt));
+  return events;
 }

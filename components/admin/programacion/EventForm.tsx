@@ -33,6 +33,9 @@ export function EventForm({ initial }: Props) {
   const [published, setPublished] = useState<boolean>(
     initial?.published ?? false,
   );
+  const [showAsPopup, setShowAsPopup] = useState<boolean>(
+    initial?.showAsPopup ?? false,
+  );
   const [imageKey, setImageKey] = useState<string>(initial?.imageKey ?? "");
   const [imageContentType, setImageContentType] = useState<string>(
     initial?.imageContentType ?? "",
@@ -99,6 +102,7 @@ export function EventForm({ initial }: Props) {
         imageKey,
         imageContentType: imageContentType || undefined,
         published,
+        showAsPopup,
       };
       const res = await fetch(
         isEdit
@@ -247,15 +251,32 @@ export function EventForm({ initial }: Props) {
         </div>
       </div>
 
-      <label className="inline-flex select-none items-center gap-2 text-sm">
-        <input
-          type="checkbox"
-          checked={published}
-          onChange={(e) => setPublished(e.target.checked)}
-          className="h-4 w-4 accent-brand"
-        />
-        <span>Publicar en el feed</span>
-      </label>
+      <div className="flex flex-col gap-2">
+        <label className="inline-flex select-none items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={published}
+            onChange={(e) => setPublished(e.target.checked)}
+            className="h-4 w-4 accent-brand"
+          />
+          <span>Publicar en el feed</span>
+        </label>
+        <label className="inline-flex select-none items-start gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={showAsPopup}
+            onChange={(e) => setShowAsPopup(e.target.checked)}
+            className="mt-0.5 h-4 w-4 accent-brand"
+          />
+          <span>
+            Pop up
+            <span className="ml-1 text-xs text-muted">
+              (aparece como aviso en la pantalla principal del socio; requiere
+              estar publicado).
+            </span>
+          </span>
+        </label>
+      </div>
 
       {error ? (
         <p

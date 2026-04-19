@@ -129,6 +129,12 @@ export interface EventRecord {
   imageContentType?: string;
   /** Si es `true`, aparece en el feed público de `/app`. */
   published: boolean;
+  /**
+   * Si es `true` y `published` también lo es, el evento puede aparecer como
+   * pop up recurrente en la página principal del socio (`/app`).
+   * `undefined` se trata como `false` (compatibilidad con eventos antiguos).
+   */
+  showAsPopup?: boolean;
   createdAt: string;
   updatedAt: string;
   /** Id del admin que creó el evento (auditoría). */

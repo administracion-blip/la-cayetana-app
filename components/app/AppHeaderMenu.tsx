@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { PinToHomeScreenModal } from "@/components/app/PinToHomeScreenModal";
 import { Bars3Icon } from "@/components/icons/Bars3Icon";
 
 type Props = {
@@ -12,6 +13,7 @@ type Props = {
 export function AppHeaderMenu({ isAdmin }: Props) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
+  const [pinOpen, setPinOpen] = useState(false);
   const panelId = useId();
   const buttonRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -88,7 +90,7 @@ export function AppHeaderMenu({ isAdmin }: Props) {
             </Link>
             {isAdmin ? (
               <Link
-                href="/admin/users"
+                href="/admin"
                 role="menuitem"
                 className="block px-4 py-2.5 text-sm font-medium text-brand hover:bg-muted/50"
                 onClick={close}
@@ -96,9 +98,23 @@ export function AppHeaderMenu({ isAdmin }: Props) {
                 Admin
               </Link>
             ) : null}
+            <div className="px-2 pb-1.5 pt-1" role="presentation">
+              <button
+                type="button"
+                role="menuitem"
+                className="w-full rounded-lg border border-amber-200/90 bg-amber-100 px-3 py-2.5 text-left text-sm font-medium text-foreground shadow-sm transition hover:bg-amber-200/70 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-400"
+                onClick={() => {
+                  close();
+                  setPinOpen(true);
+                }}
+              >
+                Anclar a pantalla principal
+              </button>
+            </div>
           </div>
         </>
       ) : null}
+      <PinToHomeScreenModal open={pinOpen} onClose={() => setPinOpen(false)} />
     </div>
   );
 }

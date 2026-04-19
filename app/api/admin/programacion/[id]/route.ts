@@ -65,6 +65,7 @@ export async function PATCH(
       imageKey: parsed.data.imageKey,
       imageContentType: parsed.data.imageContentType || undefined,
       published: parsed.data.published,
+      showAsPopup: parsed.data.showAsPopup,
       updatedByUserId: auth.user.id,
     });
 

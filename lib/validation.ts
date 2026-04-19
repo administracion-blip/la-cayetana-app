@@ -90,6 +90,7 @@ export const eventSchema = z.object({
     .optional()
     .or(z.literal("")),
   published: z.boolean(),
+  showAsPopup: z.boolean().optional().default(false),
 });
 
 export const eventPatchSchema = eventSchema.partial();

@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { PrivacyPolicyModal } from "@/components/auth/PrivacyPolicyModal";
 import { MAX_BIRTH_YEAR, MIN_BIRTH_YEAR } from "@/lib/validation";
 
 const SEX_OPTIONS: { value: "male" | "female" | "prefer_not_to_say"; label: string }[] = [
@@ -46,6 +47,7 @@ function EyeIcon({ open }: { open: boolean }) {
 }
 
 export function RegistrationForm() {
+  const [privacyOpen, setPrivacyOpen] = useState(false);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
@@ -322,18 +324,37 @@ export function RegistrationForm() {
           </p>
         ) : null}
       </div>
-      <label className="flex items-start gap-2 text-sm text-muted">
+      <div className="flex items-start gap-2 text-sm text-muted">
         <input
+          id="registration-accept-terms"
           type="checkbox"
           checked={acceptTerms}
           onChange={(e) => setAcceptTerms(e.target.checked)}
           required
-          className="mt-1 h-4 w-4 accent-brand"
+          className="mt-1 h-4 w-4 shrink-0 accent-brand"
         />
-        <span>
-          He leído y acepto las condiciones de uso y la política de privacidad.
-        </span>
-      </label>
+        <p className="min-w-0 leading-snug">
+          <label htmlFor="registration-accept-terms" className="cursor-pointer">
+            He leído y acepto las condiciones de uso y la{" "}
+          </label>
+          <button
+            type="button"
+            className="inline p-0 text-left font-inherit text-brand underline underline-offset-2 hover:text-brand-hover focus-visible:rounded focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setPrivacyOpen(true);
+            }}
+          >
+            política de privacidad
+          </button>
+          .
+        </p>
+      </div>
+      <PrivacyPolicyModal
+        open={privacyOpen}
+        onClose={() => setPrivacyOpen(false)}
+      />
 
       {error ? (
         <p className="text-sm text-red-600" role="alert">

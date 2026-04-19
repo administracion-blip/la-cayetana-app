@@ -43,6 +43,7 @@ export async function POST(req: Request) {
       imageKey: parsed.data.imageKey,
       imageContentType: parsed.data.imageContentType || undefined,
       published: parsed.data.published,
+      showAsPopup: parsed.data.showAsPopup ?? false,
       createdByUserId: auth.user.id,
     });
     return NextResponse.json({ ok: true, event }, { status: 201 });
