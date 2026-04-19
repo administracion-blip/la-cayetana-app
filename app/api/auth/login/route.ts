@@ -36,7 +36,7 @@ export async function POST(request: Request) {
       return redirectTo(request, "/login?error=bad-input");
     }
 
-    const { email, password } = parsed.data;
+    const { email, password, rememberMe } = parsed.data;
     const user = await getUserByEmail(email);
     if (!user) {
       if (asJson) {
@@ -62,20 +62,27 @@ export async function POST(request: Request) {
     }
 
     if (user.status !== "active") {
+      const pendingMsg =
+        "Tu cuenta está pendiente de validación de pago. Te avisaremos cuando esté lista.";
+      const inactiveMsg = "Tu cuenta no está activa.";
+      const isPending = user.status === "pending_payment";
       if (asJson) {
         return NextResponse.json(
-          { error: "Tu cuenta no está activa" },
+          { error: isPending ? pendingMsg : inactiveMsg },
           { status: 403 },
         );
       }
-      return redirectTo(request, "/login?error=inactive");
+      return redirectTo(
+        request,
+        isPending ? "/login?error=pending" : "/login?error=inactive",
+      );
     }
 
     const token = await createSessionToken({
       sub: user.id,
       email: user.email,
     });
-    await setSessionCookie(token);
+    await setSessionCookie(token, { persistent: rememberMe });
 
     if (asJson) {
       return NextResponse.json({ ok: true });

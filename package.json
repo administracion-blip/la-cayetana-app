@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:https": "next dev --experimental-https",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
@@ -15,6 +16,7 @@
     "@aws-sdk/client-s3": "^3.1032.0",
     "@aws-sdk/client-ses": "^3.1032.0",
     "@aws-sdk/lib-dynamodb": "^3.1032.0",
+    "@yudiel/react-qr-scanner": "^2.5.1",
     "bcryptjs": "^3.0.3",
     "jose": "^6.2.2",
     "next": "16.2.4",

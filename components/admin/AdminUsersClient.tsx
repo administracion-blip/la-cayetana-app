@@ -1,7 +1,20 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
+import { QrScanIcon } from "@/components/icons/QrScanIcon";
 import type { UserRecord } from "@/types/models";
+import { QrScannerModal } from "./QrScannerModal";
+import { UserQuickSheet } from "./UserQuickSheet";
+
+/**
+ * Extrae el número de socio (CY…) del texto de un QR. El QR del carnet contiene
+ * hoy literalmente `CY0234`, pero si en el futuro se cambia a una URL del tipo
+ * `https://.../socio/CY0234` esta función sigue funcionando.
+ */
+function extractMembershipId(raw: string): string {
+  const match = raw.match(/CY\d{3,}/i);
+  return match ? match[0].toUpperCase() : raw.trim().toUpperCase();
+}
 
 export type SafeUser = Omit<UserRecord, "passwordHash">;
 
@@ -33,17 +46,17 @@ const COLUMNS: { key: SortKey; label: string }[] = [
 ];
 
 const DEFAULT_WIDTHS: Record<SortKey, number> = {
-  membershipId: 100,
-  name: 170,
-  email: 220,
-  phone: 110,
-  sex: 130,
-  birthYear: 88,
-  status: 100,
-  paidAmount: 100,
-  deliveryStatus: 220,
-  isAdmin: 72,
-  createdAt: 160,
+  membershipId: 78,
+  name: 140,
+  email: 180,
+  phone: 96,
+  sex: 90,
+  birthYear: 64,
+  status: 84,
+  paidAmount: 76,
+  deliveryStatus: 160,
+  isAdmin: 56,
+  createdAt: 124,
 };
 
 const SEX_LABEL: Record<string, string> = {
@@ -113,6 +126,8 @@ function compareUsers(
   }
 }
 
+type QuickFilter = "all" | "pendingPayment" | "pendingDelivery";
+
 export function AdminUsersClient({ users }: { users: SafeUser[] }) {
   const [q, setQ] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("membershipId");
@@ -120,11 +135,37 @@ export function AdminUsersClient({ users }: { users: SafeUser[] }) {
   const [widths, setWidths] = useState<Record<SortKey, number>>(() => ({
     ...DEFAULT_WIDTHS,
   }));
-  const [onlyPending, setOnlyPending] = useState(false);
+  const [quickFilter, setQuickFilter] = useState<QuickFilter>("all");
   const [rows, setRows] = useState<SafeUser[]>(users);
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [scannerOpen, setScannerOpen] = useState(false);
+  const [scannedUserId, setScannedUserId] = useState<string | null>(null);
   const [, startTransition] = useTransition();
+
+  // La ficha se deriva de `rows` para reflejar actualizaciones (p.ej. tras
+  // activar o marcar entregado la ficha muestra el nuevo estado sin cerrarse).
+  const scannedUser = useMemo(
+    () => (scannedUserId ? rows.find((u) => u.id === scannedUserId) ?? null : null),
+    [rows, scannedUserId],
+  );
+
+  const handleScanResult = useCallback(
+    (raw: string) => {
+      setScannerOpen(false);
+      const cy = extractMembershipId(raw);
+      const found = rows.find(
+        (u) => (u.membershipId ?? "").toUpperCase() === cy,
+      );
+      if (!found) {
+        window.alert(`No se encontró ningún socio con QR "${cy}".`);
+        return;
+      }
+      setQ(cy);
+      setScannedUserId(found.id);
+    },
+    [rows],
+  );
 
   useEffect(() => {
     setRows(users);
@@ -132,13 +173,18 @@ export function AdminUsersClient({ users }: { users: SafeUser[] }) {
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    const base = onlyPending
-      ? rows.filter(
-          (u) =>
-            u.status === "active" &&
-            (u.deliveryStatus ?? "pending") === "pending",
-        )
-      : rows;
+    let base: SafeUser[];
+    if (quickFilter === "pendingPayment") {
+      base = rows.filter((u) => u.status === "pending_payment");
+    } else if (quickFilter === "pendingDelivery") {
+      base = rows.filter(
+        (u) =>
+          u.status === "active" &&
+          (u.deliveryStatus ?? "pending") === "pending",
+      );
+    } else {
+      base = rows;
+    }
     if (!needle) return base;
     return base.filter(
       (u) =>
@@ -147,7 +193,7 @@ export function AdminUsersClient({ users }: { users: SafeUser[] }) {
         (u.membershipId?.toLowerCase().includes(needle) ?? false) ||
         (u.phone?.toLowerCase().includes(needle) ?? false),
     );
-  }, [rows, q, onlyPending]);
+  }, [rows, q, quickFilter]);
 
   const sorted = useMemo(() => {
     const copy = [...filtered];
@@ -155,7 +201,11 @@ export function AdminUsersClient({ users }: { users: SafeUser[] }) {
     return copy;
   }, [filtered, sortKey, sortDir]);
 
-  const pendingCount = useMemo(
+  const pendingPaymentCount = useMemo(
+    () => rows.filter((u) => u.status === "pending_payment").length,
+    [rows],
+  );
+  const pendingDeliveryCount = useMemo(
     () =>
       rows.filter(
         (u) =>
@@ -208,6 +258,74 @@ export function AdminUsersClient({ users }: { users: SafeUser[] }) {
       document.body.style.userSelect = "";
     };
   }, []);
+
+  const handleActivate = useCallback(
+    async (user: SafeUser) => {
+      const label =
+        user.status === "pending_payment"
+          ? `¿Confirmas el pago y activas a ${user.name}? Se le asignará un carnet (CY) y podrá iniciar sesión.`
+          : `¿Confirmas la renovación de ${user.name}? Se actualizará la fecha de pago de este año.`;
+      if (!window.confirm(label)) return;
+      setError(null);
+      setPendingId(user.id);
+      try {
+        const res = await fetch(
+          `/api/admin/users/${encodeURIComponent(user.id)}/activate`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({}),
+          },
+        );
+        const data = (await res.json().catch(() => null)) as
+          | {
+              ok?: boolean;
+              error?: string;
+              user?: {
+                membershipId?: string | null;
+                status?: "active" | "inactive" | "pending_payment";
+                paidAt?: string | null;
+                paidAmount?: number | null;
+                deliveryStatus?: "pending" | "delivered";
+                activatedAt?: string | null;
+              };
+            }
+          | null;
+        if (!res.ok || !data?.ok) {
+          setError(data?.error ?? "No se pudo activar al usuario");
+          return;
+        }
+        startTransition(() => {
+          setRows((prev) =>
+            prev.map((u) =>
+              u.id === user.id
+                ? {
+                    ...u,
+                    entityType: "USER",
+                    status: data.user?.status ?? "active",
+                    membershipId:
+                      data.user?.membershipId ?? u.membershipId,
+                    paidAt: data.user?.paidAt ?? u.paidAt,
+                    paidAmount:
+                      data.user?.paidAmount ?? u.paidAmount ?? undefined,
+                    deliveryStatus:
+                      data.user?.deliveryStatus ?? "pending",
+                    activatedAt:
+                      data.user?.activatedAt ?? u.activatedAt ?? undefined,
+                  }
+                : u,
+            ),
+          );
+        });
+      } catch (e) {
+        console.error(e);
+        setError("Error de red al activar al usuario");
+      } finally {
+        setPendingId(null);
+      }
+    },
+    [],
+  );
 
   const handleDelivery = useCallback(
     async (user: SafeUser, action: "deliver" | "undo") => {
@@ -297,8 +415,69 @@ export function AdminUsersClient({ users }: { users: SafeUser[] }) {
             {u.birthYear ?? "—"}
           </span>
         );
-      case "status":
-        return <span className="capitalize">{u.status}</span>;
+      case "status": {
+        if (u.status === "pending_payment") {
+          const busy = pendingId === u.id;
+          return (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700 ring-1 ring-inset ring-amber-200">
+                Pendiente pago
+              </span>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => handleActivate(u)}
+                className="rounded-md bg-brand px-2 py-0.5 text-xs font-medium text-white hover:bg-brand-hover disabled:opacity-50"
+                title="Confirmar pago y activar socio"
+              >
+                {busy ? "…" : "Activar"}
+              </button>
+            </div>
+          );
+        }
+        if (u.status === "inactive") {
+          const busy = pendingId === u.id;
+          return (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="inline-flex items-center rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-700 ring-1 ring-inset ring-zinc-200">
+                Inactivo
+              </span>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => handleActivate(u)}
+                className="rounded-md bg-brand px-2 py-0.5 text-xs font-medium text-white hover:bg-brand-hover disabled:opacity-50"
+                title="Confirmar pago y activar socio"
+              >
+                {busy ? "…" : "Activar"}
+              </button>
+            </div>
+          );
+        }
+        // active: botón "Renovar" = misma activación manual, refresca paidAt.
+        const busy = pendingId === u.id;
+        const currentYear = new Date().getUTCFullYear();
+        const paidThisYear =
+          u.paidAt && new Date(u.paidAt).getUTCFullYear() === currentYear;
+        return (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700 ring-1 ring-inset ring-emerald-200">
+              Activo
+            </span>
+            {!paidThisYear ? (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => handleActivate(u)}
+                className="rounded-md border border-border bg-white px-2 py-0.5 text-xs text-foreground hover:bg-zinc-50 disabled:opacity-50"
+                title="Confirmar renovación de este año"
+              >
+                {busy ? "…" : "Renovar"}
+              </button>
+            ) : null}
+          </div>
+        );
+      }
       case "paidAmount":
         return (
           <span className="whitespace-nowrap font-mono text-xs">
@@ -378,29 +557,91 @@ export function AdminUsersClient({ users }: { users: SafeUser[] }) {
           <label className="mb-2 block text-sm text-muted" htmlFor="search">
             Buscar por nombre, email o número
           </label>
-          <input
-            id="search"
-            type="search"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="Ej. CY0001 o nombre…"
-            className="w-full max-w-md rounded-xl border border-border bg-card px-4 py-2 text-[15px] outline-none ring-brand focus:ring-2"
-          />
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setScannerOpen(true)}
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-border bg-card px-3 py-2 text-sm font-medium text-foreground hover:bg-zinc-50 md:hidden"
+              aria-label="Escanear QR de socio"
+              title="Escanear QR"
+            >
+              <QrScanIcon className="h-5 w-5 text-brand" />
+              Escanear
+            </button>
+            <input
+              id="search"
+              type="search"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Ej. CY0001 o nombre…"
+              className="w-full max-w-md rounded-xl border border-border bg-card px-4 py-2 text-[15px] outline-none ring-brand focus:ring-2"
+            />
+          </div>
         </div>
-        <label className="flex select-none items-center gap-2 rounded-xl border border-border bg-card px-3 py-2 text-sm">
-          <input
-            type="checkbox"
-            checked={onlyPending}
-            onChange={(e) => setOnlyPending(e.target.checked)}
-            className="h-4 w-4 accent-amber-600"
-          />
-          <span>
-            Solo pendientes de entrega
-            <span className="ml-2 rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700 ring-1 ring-inset ring-amber-200">
-              {pendingCount}
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-border bg-card p-1 text-sm">
+          <button
+            type="button"
+            onClick={() => setQuickFilter("all")}
+            className={`rounded-lg px-3 py-1.5 ${
+              quickFilter === "all"
+                ? "bg-brand text-white"
+                : "text-muted hover:bg-zinc-50"
+            }`}
+          >
+            Todos
+            <span
+              className={`ml-2 rounded-full px-2 py-0.5 text-xs ${
+                quickFilter === "all"
+                  ? "bg-white/20 text-white"
+                  : "bg-zinc-100 text-zinc-700"
+              }`}
+            >
+              {rows.length}
             </span>
-          </span>
-        </label>
+          </button>
+          <button
+            type="button"
+            onClick={() => setQuickFilter("pendingPayment")}
+            className={`rounded-lg px-3 py-1.5 ${
+              quickFilter === "pendingPayment"
+                ? "bg-amber-600 text-white"
+                : "text-muted hover:bg-zinc-50"
+            }`}
+            title="Drafts esperando validación manual del pago"
+          >
+            Pendientes de pago
+            <span
+              className={`ml-2 rounded-full px-2 py-0.5 text-xs ${
+                quickFilter === "pendingPayment"
+                  ? "bg-white/20 text-white"
+                  : "bg-amber-50 text-amber-700 ring-1 ring-inset ring-amber-200"
+              }`}
+            >
+              {pendingPaymentCount}
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setQuickFilter("pendingDelivery")}
+            className={`rounded-lg px-3 py-1.5 ${
+              quickFilter === "pendingDelivery"
+                ? "bg-emerald-700 text-white"
+                : "text-muted hover:bg-zinc-50"
+            }`}
+            title="Socios activos cuyo bono aún no se ha entregado"
+          >
+            Pendientes de entrega
+            <span
+              className={`ml-2 rounded-full px-2 py-0.5 text-xs ${
+                quickFilter === "pendingDelivery"
+                  ? "bg-white/20 text-white"
+                  : "bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-200"
+              }`}
+            >
+              {pendingDeliveryCount}
+            </span>
+          </button>
+        </div>
       </div>
 
       {error ? (
@@ -411,7 +652,7 @@ export function AdminUsersClient({ users }: { users: SafeUser[] }) {
 
       <div className="overflow-x-auto rounded-xl border border-border">
         <table
-          className="text-left text-sm"
+          className="text-left text-xs"
           style={{ tableLayout: "fixed", width: "max-content", minWidth: "100%" }}
         >
           <thead className="border-b border-border bg-zinc-50">
@@ -432,7 +673,7 @@ export function AdminUsersClient({ users }: { users: SafeUser[] }) {
                 >
                   <button
                     type="button"
-                    className="flex w-full items-center gap-1 px-3 py-2 pr-4 text-left hover:bg-zinc-100/80"
+                    className="flex w-full items-center gap-1 px-2 py-1.5 pr-3 text-left hover:bg-zinc-100/80"
                     onClick={() => onHeaderClick(key)}
                   >
                     <span className="truncate">{label}</span>
@@ -461,7 +702,7 @@ export function AdminUsersClient({ users }: { users: SafeUser[] }) {
                   <td
                     key={key}
                     style={{ width: widths[key] }}
-                    className="px-3 py-2 align-top"
+                    className="px-2 py-1.5 align-top"
                   >
                     {cellValue(u, key)}
                   </td>
@@ -474,8 +715,27 @@ export function AdminUsersClient({ users }: { users: SafeUser[] }) {
 
       <p className="mt-4 text-xs text-muted">
         Mostrando {sorted.length} de {rows.length} socios
-        {onlyPending ? " (filtrando pendientes de entrega)" : ""}.
+        {quickFilter === "pendingPayment"
+          ? " (solo pendientes de pago)"
+          : quickFilter === "pendingDelivery"
+            ? " (solo pendientes de entrega)"
+            : ""}
+        .
       </p>
+
+      <QrScannerModal
+        open={scannerOpen}
+        onClose={() => setScannerOpen(false)}
+        onResult={handleScanResult}
+      />
+
+      <UserQuickSheet
+        user={scannedUser}
+        busy={!!scannedUser && pendingId === scannedUser.id}
+        onClose={() => setScannedUserId(null)}
+        onActivate={handleActivate}
+        onDelivery={handleDelivery}
+      />
     </div>
   );
 }

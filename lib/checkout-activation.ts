@@ -9,9 +9,14 @@ import {
 import type { UserRecord } from "@/types/models";
 
 /**
- * Dada una Checkout Session de Stripe, intenta activar el preregistro asociado
- * (si aún no lo estaba) y envía correo de bienvenida una sola vez. Idempotente.
- * Devuelve el usuario actualizado o null si no se pudo localizar.
+ * [INACTIVO EN EL FLUJO MANUAL]
+ *
+ * Activa un preregistro a partir de una Checkout Session de Stripe. Se
+ * mantiene para poder restaurar el flujo automático con un cambio mínimo
+ * (volver a llamarla desde el webhook y desde `/api/checkout/verify`).
+ *
+ * Hoy no se llama desde ningún lado: la activación la hace el admin a través
+ * de `activateUserManually` + `/api/admin/users/[id]/activate`.
  */
 export async function activateUserFromCheckoutSession(
   session: Stripe.Checkout.Session,

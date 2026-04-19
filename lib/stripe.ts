@@ -11,12 +11,15 @@ export function getStripe(): Stripe {
 }
 
 /**
- * Construye la URL del Payment Link de Stripe añadiendo los parámetros
- * necesarios para que, tras el pago, el webhook pueda localizar al usuario:
- *  - `client_reference_id`: id interno del usuario/preregistro.
- *  - `prefilled_email`: email del socio (opcional pero mejora UX).
+ * [INACTIVO EN EL FLUJO MANUAL]
  *
- * El producto, precio y success_url se configuran en el dashboard de Stripe.
+ * Construye la URL del Payment Link añadiendo `client_reference_id` y
+ * `prefilled_email` para que un webhook pueda ligar el pago al preregistro.
+ *
+ * Hoy no se usa: en el flujo manual el frontend redirige directamente a
+ * `NEXT_PUBLIC_STRIPE_PAYMENT_LINK` sin parámetros y la activación la hace
+ * el admin desde `/admin/users`. Se mantiene como utilidad lista para
+ * cuando se reactive el flujo automático.
  */
 export function buildStripePaymentLinkUrl(params: {
   userId: string;

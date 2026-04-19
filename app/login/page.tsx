@@ -12,6 +12,8 @@ function errorMessage(code?: string): string | null {
       return "Email o contraseña incorrectos.";
     case "bad-input":
       return "Revisa el email y la contraseña.";
+    case "pending":
+      return "Tu cuenta está pendiente de validación de pago. Te avisaremos cuando esté lista.";
     case "inactive":
       return "Tu cuenta no está activa.";
     case "server":

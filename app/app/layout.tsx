@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { CarnetFab } from "@/components/app/CarnetFab";
-import { LogoutButton } from "@/components/app/LogoutButton";
 import { Logo } from "@/components/brand/Logo";
 import { getSessionFromCookies } from "@/lib/auth/session";
 import { getUserById } from "@/lib/repositories/users";
@@ -50,13 +49,12 @@ export default async function PrivateLayout({
             </Link>
             {user.isAdmin ? (
               <Link
-                href="/admin/users"
+                href="/admin"
                 className="text-brand hover:text-brand-hover"
               >
                 Admin
               </Link>
             ) : null}
-            <LogoutButton />
           </nav>
         </div>
       </header>

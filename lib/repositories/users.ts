@@ -483,6 +483,162 @@ export async function activateUserAfterPayment(input: {
   }
 }
 
+export class ManualActivationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ManualActivationError";
+  }
+}
+
+/**
+ * Activa un socio manualmente desde el panel admin tras verificar el cobro en
+ * Stripe. Versión simplificada de {@link activateUserAfterPayment} pensada para
+ * el flujo manual (sin webhook):
+ *
+ *  - Draft (`DRAFT_REGISTRATION` + `pending_payment`) → lo promociona a `USER`
+ *    y le asigna un `membershipId` nuevo (rango Stripe, CY1000+). Aplica
+ *    `pendingPasswordHash`/`pendingProfile` si existían.
+ *  - Legacy (`USER` + `inactive`) → lo activa conservando su `membershipId`.
+ *  - Renovación (`USER` + `active`) → refresca `paidAt` y resetea entrega.
+ *
+ * Idempotente: si ya estaba activo en el año en curso, devuelve el registro
+ * sin cambios. `paidAmountCents` es opcional (si lo conoces por el recibo de
+ * Stripe puedes pasarlo; si no, se deja lo que hubiese).
+ *
+ * TODO: cuando volvamos a tener webhook/automatización, llamar a esta función
+ * también desde `activateUserFromCheckoutSession` en lugar de duplicar lógica.
+ */
+export async function activateUserManually(input: {
+  userId: string;
+  adminUserId: string;
+  paidAmountCents?: number | null;
+}): Promise<ActivateUserResult> {
+  const existing = await getUserById(input.userId);
+  if (!existing) {
+    throw new ManualActivationError("Usuario no encontrado");
+  }
+
+  if (
+    existing.status === "active" &&
+    existing.paidAt &&
+    new Date(existing.paidAt).getUTCFullYear() ===
+      new Date().getUTCFullYear()
+  ) {
+    return { user: existing, justActivated: false };
+  }
+
+  let membershipId = existing.membershipId;
+  const isNewSignup = !membershipId;
+  if (isNewSignup) {
+    const seq = await incrementMembershipCounter();
+    membershipId = formatMembershipId(seq);
+  }
+
+  const paidAt = new Date().toISOString();
+  const pendingHash = existing.pendingPasswordHash;
+  const pendingProfile = existing.pendingProfile ?? {};
+
+  const doc = getDocClient();
+  const { USERS_TABLE_NAME } = getEnv();
+
+  const names: Record<string, string> = {
+    "#status": "status",
+    "#et": "entityType",
+    "#mid": "membershipId",
+    "#paidAt": "paidAt",
+    "#exp": "expiresAt",
+    "#dStatus": "deliveryStatus",
+    "#pCurrency": "paidCurrency",
+    "#approvedBy": "activatedByUserId",
+    "#approvedAt": "activatedAt",
+  };
+  const values: Record<string, unknown> = {
+    ":active": "active" satisfies UserStatus,
+    ":userEt": USER_ENTITY_TYPE,
+    ":mid": membershipId,
+    ":paidAt": paidAt,
+    ":deliveryPending": "pending",
+    ":eur": "EUR",
+    ":adm": input.adminUserId,
+    ":now": paidAt,
+  };
+  const setParts: string[] = [
+    "#status = :active",
+    "#et = :userEt",
+    "#mid = :mid",
+    "#paidAt = :paidAt",
+    "#dStatus = :deliveryPending",
+    "#pCurrency = :eur",
+    "#approvedBy = :adm",
+    "#approvedAt = :now",
+  ];
+
+  if (
+    typeof input.paidAmountCents === "number" &&
+    input.paidAmountCents >= 0
+  ) {
+    names["#pAmount"] = "paidAmount";
+    values[":pAmount"] = Math.round(input.paidAmountCents);
+    setParts.push("#pAmount = :pAmount");
+  }
+  if (pendingHash) {
+    names["#ph"] = "passwordHash";
+    values[":ph"] = pendingHash;
+    setParts.push("#ph = :ph");
+  }
+  if (pendingProfile.name) {
+    names["#name"] = "name";
+    values[":name"] = pendingProfile.name;
+    setParts.push("#name = :name");
+  }
+  if (pendingProfile.phone) {
+    names["#phone"] = "phone";
+    values[":phone"] = pendingProfile.phone;
+    setParts.push("#phone = :phone");
+  }
+  if (pendingProfile.sex) {
+    names["#sex"] = "sex";
+    values[":sex"] = pendingProfile.sex;
+    setParts.push("#sex = :sex");
+  }
+  if (typeof pendingProfile.birthYear === "number") {
+    names["#by"] = "birthYear";
+    values[":by"] = pendingProfile.birthYear;
+    setParts.push("#by = :by");
+  }
+  // Alta nueva promocionada: garantizamos isAdmin = false explícito.
+  if (existing.entityType === DRAFT_ENTITY_TYPE) {
+    names["#adm2"] = "isAdmin";
+    values[":admFalse"] = false;
+    setParts.push("#adm2 = :admFalse");
+  }
+
+  const removeParts = [
+    "#exp",
+    "pendingPasswordHash",
+    "pendingProfile",
+    "deliveredAt",
+    "deliveredByUserId",
+  ];
+
+  const res = await doc.send(
+    new UpdateCommand({
+      TableName: USERS_TABLE_NAME,
+      Key: { id: input.userId },
+      UpdateExpression: `SET ${setParts.join(", ")} REMOVE ${removeParts.join(", ")}`,
+      ConditionExpression: "attribute_exists(id)",
+      ExpressionAttributeNames: names,
+      ExpressionAttributeValues: values,
+      ReturnValues: "ALL_NEW",
+    }),
+  );
+  const updated = res.Attributes as UserRecord | undefined;
+  if (!updated) {
+    throw new ManualActivationError("No se pudo activar al usuario");
+  }
+  return { user: updated, justActivated: true };
+}
+
 export async function markWelcomeEmailSent(userId: string): Promise<void> {
   const doc = getDocClient();
   const { USERS_TABLE_NAME } = getEnv();
@@ -536,6 +692,11 @@ export async function getUserByEmail(
   return item as UserRecord;
 }
 
+/**
+ * Lista socios confirmados (`entityType = USER`). No incluye drafts pendientes
+ * de pago. Para ver también los drafts (panel admin, activación manual), usar
+ * {@link listUsersAndDrafts}.
+ */
 export async function listUsers(): Promise<UserRecord[]> {
   const doc = getDocClient();
   const { USERS_TABLE_NAME } = getEnv();
@@ -553,6 +714,45 @@ export async function listUsers(): Promise<UserRecord[]> {
     );
     for (const item of res.Items ?? []) {
       if (item.entityType === "USER") {
+        users.push(item as UserRecord);
+      }
+    }
+    startKey = res.LastEvaluatedKey;
+  } while (startKey);
+
+  users.sort(
+    (a, b) =>
+      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+  );
+  return users;
+}
+
+/**
+ * Lista socios confirmados + drafts pendientes de pago. Pensado para el panel
+ * admin en el flujo de activación manual, donde el administrador necesita ver
+ * también a quien ha rellenado el formulario para aprobarlo tras comprobar el
+ * cobro en Stripe.
+ */
+export async function listUsersAndDrafts(): Promise<UserRecord[]> {
+  const doc = getDocClient();
+  const { USERS_TABLE_NAME } = getEnv();
+  const users: UserRecord[] = [];
+  let startKey: Record<string, unknown> | undefined;
+
+  do {
+    const res = await doc.send(
+      new ScanCommand({
+        TableName: USERS_TABLE_NAME,
+        FilterExpression: "entityType = :u OR entityType = :d",
+        ExpressionAttributeValues: {
+          ":u": USER_ENTITY_TYPE,
+          ":d": DRAFT_ENTITY_TYPE,
+        },
+        ExclusiveStartKey: startKey,
+      }),
+    );
+    for (const item of res.Items ?? []) {
+      if (isPersonEntity(item.entityType)) {
         users.push(item as UserRecord);
       }
     }

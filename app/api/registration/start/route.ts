@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { hashPassword } from "@/lib/auth/password";
+import { getEnv } from "@/lib/env";
 import {
   canRenewThisYear,
   createPendingUser,
@@ -9,9 +10,22 @@ import {
   prepareRenewal,
   UserAlreadyPaidThisYearError,
 } from "@/lib/repositories/users";
-import { buildStripePaymentLinkUrl } from "@/lib/stripe";
 import { registrationStartSchema } from "@/lib/validation";
 
+/**
+ * Alta o renovación desde `/registro`.
+ *
+ * Flujo actual (MANUAL, sin webhook): solo persistimos los datos en Dynamo
+ * (draft pendiente de pago o renovación con `pendingProfile`) y devolvemos
+ * la URL del Payment Link FIJO de Stripe. El admin activará la cuenta
+ * manualmente desde `/admin/users` tras verificar el cobro.
+ *
+ * No se adjuntan parámetros a la URL de Stripe (ni `client_reference_id` ni
+ * `prefilled_email`): esta información no se utiliza en el flujo manual.
+ *
+ * TODO: al volver al flujo automático, reañadir `buildStripePaymentLinkUrl`
+ * con `userId` y `email` para poder ligar la Checkout Session al draft.
+ */
 export async function POST(request: Request) {
   try {
     const json = await request.json();
@@ -25,9 +39,8 @@ export async function POST(request: Request) {
     }
 
     const { name, email, phone, sex, birthYear, password } = parsed.data;
+    const { NEXT_PUBLIC_STRIPE_PAYMENT_LINK: paymentLink } = getEnv();
 
-    // Detectamos si el email pertenece ya a un socio (renovación) o si es un
-    // alta nueva. Los preregistros `pending_payment` siguen el flujo estándar.
     const existing = await getUserByEmail(email);
     const isRenewal =
       !!existing &&
@@ -68,20 +81,14 @@ export async function POST(request: Request) {
         throw err;
       }
 
-      const url = buildStripePaymentLinkUrl({
-        userId: existing.id,
-        email: existing.email,
-      });
-
       return NextResponse.json({
-        url,
+        url: paymentLink,
         userId: existing.id,
         renewal: true,
         membershipId: existing.membershipId ?? null,
       });
     }
 
-    // Alta nueva.
     const passwordHash = await hashPassword(password);
     let user;
     try {
@@ -115,12 +122,7 @@ export async function POST(request: Request) {
       throw err;
     }
 
-    const url = buildStripePaymentLinkUrl({
-      userId: user.id,
-      email: user.email,
-    });
-
-    return NextResponse.json({ url, userId: user.id });
+    return NextResponse.json({ url: paymentLink, userId: user.id });
   } catch (e) {
     console.error(e);
     return NextResponse.json(

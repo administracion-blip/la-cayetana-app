@@ -1,7 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
-import { activateUserFromCheckoutSession } from "@/lib/checkout-activation";
 import { getStripe } from "@/lib/stripe";
 
+/**
+ * Consulta el estado de pago de una Checkout Session.
+ *
+ * Flujo actual (MANUAL): este endpoint YA NO activa al usuario. Solo devuelve
+ * si Stripe considera la sesión pagada. La activación la hace el admin desde
+ * `/admin/users` tras verificarlo en el dashboard de Stripe.
+ *
+ * Se mantiene por compatibilidad con la página `/success` y para que el front
+ * pueda mostrar un mensaje más preciso ("Pago recibido, pendiente de validación")
+ * en lugar de asumirlo.
+ *
+ * TODO: para volver al flujo automático, llamar aquí a
+ * `activateUserFromCheckoutSession(session)` cuando `payment_status === "paid"`.
+ */
 export async function GET(request: NextRequest) {
   try {
     const sessionId = request.nextUrl.searchParams.get("session_id");
@@ -14,20 +27,12 @@ export async function GET(request: NextRequest) {
     const stripe = getStripe();
     const session = await stripe.checkout.sessions.retrieve(sessionId);
 
-    const paid = session.payment_status === "paid";
-    let accountStatus: "active" | "pending" | "unpaid" = "unpaid";
-
-    if (paid) {
-      const user = await activateUserFromCheckoutSession(session);
-      accountStatus = user?.status === "active" ? "active" : "pending";
-    }
-
     return NextResponse.json({
-      paid,
+      paid: session.payment_status === "paid",
       paymentStatus: session.payment_status,
       sessionId: session.id,
-      /** "active" = cuenta ya disponible; "pending" = pago OK pero activación en curso; "unpaid" = aún no pagado. */
-      accountStatus,
+      /** Siempre "pending": la activación real es manual desde el panel admin. */
+      accountStatus: "pending" as const,
     });
   } catch (e) {
     console.error(e);

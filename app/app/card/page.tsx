@@ -23,10 +23,15 @@ export default async function CardPage() {
         <p className="mt-1 text-center font-mono text-sm tracking-wider text-muted">
           {user.membershipId}
         </p>
-        <div className="mt-1.5 flex justify-center">
+        <div className="mt-1.5 flex flex-wrap justify-center gap-2">
           <span className="rounded-md bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-900">
             Socio activo
           </span>
+          {user.founder ? (
+            <span className="rounded-md bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-900 ring-1 ring-inset ring-amber-200">
+              Fundador
+            </span>
+          ) : null}
         </div>
         <LiveClock />
 

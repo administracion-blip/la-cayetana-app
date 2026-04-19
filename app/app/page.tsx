@@ -1,8 +1,9 @@
 import { redirect } from "next/navigation";
 import { RenewButton } from "@/components/app/RenewButton";
-import { FeedList } from "@/components/posts/FeedList";
+import { EventFeedList } from "@/components/feed/EventFeedList";
+import { FeedAutoRefresh } from "@/components/feed/FeedAutoRefresh";
 import { getSessionFromCookies } from "@/lib/auth/session";
-import { listVisiblePosts } from "@/lib/repositories/posts";
+import { listPublishedEvents } from "@/lib/repositories/programacion";
 import { canRenewThisYear, getUserById } from "@/lib/repositories/users";
 
 export const dynamic = "force-dynamic";
@@ -13,22 +14,23 @@ export default async function FeedPage() {
   const user = await getUserById(session.sub);
   if (!user) redirect("/login");
 
-  const posts = await listVisiblePosts();
+  const events = await listPublishedEvents();
   const showRenew =
     user.status !== "pending_payment" && canRenewThisYear(user);
 
   return (
     <div>
-      <h1 className="mb-2 text-xl font-semibold">Novedades</h1>
+      <h1 className="mb-2 text-xl font-semibold">Programación</h1>
       <p className="mb-6 text-sm text-muted">
-        Eventos, promociones e información del club.
+        Eventos y actividades próximas del club.
       </p>
       {showRenew ? (
         <div className="mb-6">
           <RenewButton membershipId={user.membershipId ?? null} />
         </div>
       ) : null}
-      <FeedList posts={posts} />
+      <EventFeedList events={events} />
+      <FeedAutoRefresh />
     </div>
   );
 }

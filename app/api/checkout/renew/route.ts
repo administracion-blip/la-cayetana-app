@@ -1,16 +1,21 @@
 import { NextResponse } from "next/server";
 import { getSessionFromCookies } from "@/lib/auth/session";
+import { getEnv } from "@/lib/env";
 import {
   canRenewThisYear,
   getUserById,
   prepareRenewal,
 } from "@/lib/repositories/users";
-import { buildStripePaymentLinkUrl } from "@/lib/stripe";
 
 /**
- * Inicia la renovación de un socio logueado. Mantiene el mismo `membershipId`
- * y `userId`, y devuelve la URL del Payment Link de Stripe para completar el
- * pago. La activación posterior se realiza vía webhook (checkout.session.completed).
+ * Renovación anual desde `/app`.
+ *
+ * Flujo actual (MANUAL): marcamos el preregistro de renovación y devolvemos
+ * la URL del Payment Link FIJO de Stripe. El admin activará la renovación
+ * desde `/admin/users` tras verificar el cobro.
+ *
+ * TODO: para volver al flujo automático, añadir `client_reference_id` al
+ * enlace y re-activar el webhook/verify (ver `checkout-activation.ts`).
  */
 export async function POST() {
   try {
@@ -35,15 +40,10 @@ export async function POST() {
       );
     }
 
-    // No se actualizan datos de perfil ni contraseña desde /app: solo renovación.
     await prepareRenewal({ userId: user.id });
 
-    const url = buildStripePaymentLinkUrl({
-      userId: user.id,
-      email: user.email,
-    });
-
-    return NextResponse.json({ url });
+    const { NEXT_PUBLIC_STRIPE_PAYMENT_LINK: paymentLink } = getEnv();
+    return NextResponse.json({ url: paymentLink });
   } catch (e) {
     console.error("[checkout/renew]", e);
     return NextResponse.json(

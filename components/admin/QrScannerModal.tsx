@@ -1,0 +1,201 @@
+"use client";
+
+import { Scanner, type IDetectedBarcode } from "@yudiel/react-qr-scanner";
+import { useCallback, useEffect, useRef, useState } from "react";
+
+type Props = {
+  /** Si `true` monta el escáner y abre la cámara. */
+  open: boolean;
+  /** Se invoca cuando el usuario cierra el modal sin escanear. */
+  onClose: () => void;
+  /**
+   * Se invoca al detectar un QR. Recibe el texto crudo del QR.
+   * Tras la primera detección el modal pausa el escáner (modo one-shot).
+   */
+  onResult: (text: string) => void;
+};
+
+/**
+ * Vibra corto en dispositivos compatibles. En iOS Safari no hace nada
+ * (la API `navigator.vibrate` no está disponible), pero no lanza error.
+ */
+function triggerVibration(): void {
+  if (typeof navigator === "undefined") return;
+  if (typeof navigator.vibrate !== "function") return;
+  try {
+    navigator.vibrate(120);
+  } catch {
+    // ignorar: algunos navegadores bloquean la API sin interacción previa.
+  }
+}
+
+/**
+ * Beep corto sintetizado con WebAudio (no requiere assets). 1000 Hz durante
+ * ~90 ms con fade-out suave para que no "chasque".
+ */
+function triggerBeep(): void {
+  if (typeof window === "undefined") return;
+  const AudioCtx: typeof AudioContext | undefined =
+    window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+  if (!AudioCtx) return;
+  try {
+    const ctx = new AudioCtx();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.value = 1000;
+    gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.25, ctx.currentTime + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.09);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.1);
+    osc.onended = () => {
+      void ctx.close();
+    };
+  } catch {
+    // ignorar: sin permiso de audio o contexto no permitido.
+  }
+}
+
+/**
+ * Detecta el motivo por el que la cámara no va a arrancar ANTES de intentar
+ * abrirla. El caso más frecuente en móvil es acceder por `http://<ip-lan>`:
+ * navegadores móviles bloquean `getUserMedia` fuera de `HTTPS`/`localhost`.
+ */
+function preflightCheck(): string | null {
+  if (typeof window === "undefined") return null;
+  if (typeof navigator === "undefined") return null;
+  const host = window.location.hostname;
+  const isLocalhost =
+    host === "localhost" || host === "127.0.0.1" || host === "::1";
+  if (!window.isSecureContext && !isLocalhost) {
+    return `La cámara solo funciona sobre HTTPS. Abre esta app por https://… (estás accediendo por ${window.location.protocol}//${window.location.host}).`;
+  }
+  if (!navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== "function") {
+    return "Tu navegador no soporta el acceso a la cámara. Prueba con Chrome, Safari o Firefox actualizados.";
+  }
+  return null;
+}
+
+export function QrScannerModal({ open, onClose, onResult }: Props) {
+  const [error, setError] = useState<string | null>(null);
+  const [paused, setPaused] = useState(false);
+  const firedRef = useRef(false);
+
+  useEffect(() => {
+    if (open) {
+      const preflight = preflightCheck();
+      setError(preflight);
+      setPaused(false);
+      firedRef.current = false;
+    }
+  }, [open]);
+
+  const handleScan = useCallback(
+    (codes: IDetectedBarcode[]) => {
+      if (firedRef.current) return;
+      const first = codes[0];
+      if (!first?.rawValue) return;
+      firedRef.current = true;
+      setPaused(true);
+      triggerVibration();
+      triggerBeep();
+      onResult(first.rawValue);
+    },
+    [onResult],
+  );
+
+  const handleError = useCallback((err: unknown) => {
+    console.error("[QrScannerModal] error cámara", err);
+    const e = err as { name?: string; message?: string } | undefined;
+    const name = e?.name;
+    const message = e?.message ?? "";
+    if (name === "NotAllowedError" || name === "PermissionDeniedError") {
+      setError(
+        "Has denegado el permiso de cámara. Actívalo en los ajustes del navegador y vuelve a intentarlo.",
+      );
+    } else if (name === "NotFoundError" || name === "DevicesNotFoundError") {
+      setError("No se ha encontrado ninguna cámara en este dispositivo.");
+    } else if (name === "NotReadableError") {
+      setError("No se puede acceder a la cámara. ¿Otra app la está usando?");
+    } else if (name === "OverconstrainedError") {
+      setError(
+        "La cámara trasera no cumple las restricciones. Intenta girar el móvil o reiniciar el navegador.",
+      );
+    } else if (
+      name === "SecurityError" ||
+      /secure|https|context/i.test(message)
+    ) {
+      setError(
+        "La cámara solo funciona sobre HTTPS. Abre esta app por una URL https://…",
+      );
+    } else {
+      setError(
+        `No se ha podido iniciar la cámara${name ? ` (${name})` : ""}${
+          message ? `: ${message}` : "."
+        }`,
+      );
+    }
+  }, []);
+
+  if (!open) return null;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex flex-col bg-black/90"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Escanear código QR de socio"
+    >
+      <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-3 text-white">
+        <h2 className="text-base font-semibold">Escanear QR de socio</h2>
+        <button
+          type="button"
+          onClick={onClose}
+          className="rounded-lg border border-white/20 bg-white/10 px-3 py-1.5 text-sm hover:bg-white/20"
+        >
+          Cancelar
+        </button>
+      </div>
+
+      <div className="relative flex-1 overflow-hidden">
+        {error ? (
+          <div className="flex h-full flex-col items-center justify-center gap-4 px-6 text-center text-white">
+            <p className="max-w-sm text-[15px] leading-relaxed">{error}</p>
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-full bg-white px-4 py-2 text-sm font-medium text-black"
+            >
+              Cerrar
+            </button>
+          </div>
+        ) : (
+          <Scanner
+            onScan={handleScan}
+            onError={handleError}
+            paused={paused}
+            allowMultiple={false}
+            scanDelay={400}
+            formats={["qr_code"]}
+            constraints={{ facingMode: "environment" }}
+            components={{ finder: true, torch: true, zoom: false, onOff: false }}
+            styles={{
+              container: { width: "100%", height: "100%" },
+              video: { width: "100%", height: "100%", objectFit: "cover" },
+            }}
+          />
+        )}
+
+        {!error ? (
+          <div className="pointer-events-none absolute inset-x-0 bottom-6 flex justify-center px-6">
+            <p className="rounded-full bg-black/60 px-4 py-2 text-xs text-white shadow">
+              Apunta la cámara al QR del carnet del socio
+            </p>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}

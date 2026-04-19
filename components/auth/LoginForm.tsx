@@ -13,6 +13,7 @@ export function LoginForm({ initialError, successMessage }: Props) {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [rememberMe, setRememberMe] = useState(true);
   const [error, setError] = useState<string | null>(initialError ?? null);
   const [loading, setLoading] = useState(false);
 
@@ -24,7 +25,7 @@ export function LoginForm({ initialError, successMessage }: Props) {
       const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email, password, rememberMe }),
       });
       const data = (await res.json().catch(() => ({}))) as { error?: string };
       if (!res.ok) {
@@ -77,6 +78,16 @@ export function LoginForm({ initialError, successMessage }: Props) {
           className="w-full rounded-xl border border-border bg-background px-4 py-3 text-[15px] outline-none ring-brand focus:ring-2"
         />
       </div>
+      <label className="flex cursor-pointer select-none items-center gap-2 text-sm text-muted">
+        <input
+          type="checkbox"
+          name="rememberMe"
+          checked={rememberMe}
+          onChange={(e) => setRememberMe(e.target.checked)}
+          className="h-4 w-4 cursor-pointer rounded border-border text-brand focus:ring-brand"
+        />
+        Recordarme en este dispositivo
+      </label>
       {successMessage ? (
         <p className="text-sm text-emerald-800" role="status">
           {successMessage}

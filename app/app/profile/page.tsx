@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { LogoutButton } from "@/components/app/LogoutButton";
 import { getSessionFromCookies } from "@/lib/auth/session";
 import { getUserById } from "@/lib/repositories/users";
 
@@ -10,7 +11,10 @@ export default async function ProfilePage() {
 
   return (
     <div>
-      <h1 className="mb-6 text-xl font-semibold">Tu perfil</h1>
+      <div className="mb-6 flex items-center justify-between gap-3">
+        <h1 className="text-xl font-semibold">Tu perfil</h1>
+        <LogoutButton variant="compact" />
+      </div>
       <dl className="space-y-4 rounded-2xl border border-border bg-card p-6 shadow-sm">
         <div>
           <dt className="text-xs font-medium uppercase tracking-wide text-muted">

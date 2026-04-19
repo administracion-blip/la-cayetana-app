@@ -71,6 +71,16 @@ export interface UserRecord {
   isAdmin?: boolean;
   /** Indica que el socio fue importado masivamente (legacy). */
   legacy?: boolean;
+  /**
+   * Socio fundador del club. Cuando es `true` se muestra un distintivo
+   * amarillo "Fundador" en el carnet digital, junto al chip de "Socio activo".
+   * Se gestiona manualmente desde DynamoDB.
+   */
+  founder?: boolean;
+  /** Id del admin que aprobó manualmente la activación/renovación (flujo manual). */
+  activatedByUserId?: string;
+  /** Fecha ISO de la última activación manual (flujo manual). */
+  activatedAt?: string;
 }
 
 /** Token de un solo uso para restablecer contraseña (misma tabla Dynamo que users). */
@@ -92,6 +102,39 @@ export interface PostRecord {
   endDate: string;
   visible: boolean;
   createdAt: string;
+}
+
+/**
+ * Evento / entrada de programación que se publicita en el feed de la app.
+ * Vive en la tabla `la_cayetana_programacion`.
+ */
+export interface EventRecord {
+  /** Partition key de la tabla. UUID v4. */
+  id: string;
+  /** Partición del GSI `by-start`. Constante `"EVENT"`. */
+  entityType: "EVENT";
+  title: string;
+  description: string;
+  /**
+   * Fecha y hora del evento en ISO 8601 (`2026-05-12T20:30:00.000Z`).
+   * Se usa como SK del GSI `by-start` para ordenar el feed cronológicamente.
+   */
+  startAt: string;
+  /**
+   * Clave del objeto en S3 (ruta relativa dentro del bucket
+   * `PROGRAMACION_S3_BUCKET`). Ej: `programacion/ab12-….jpg`.
+   */
+  imageKey: string;
+  /** Content-type del archivo subido (p.ej. `image/jpeg`). */
+  imageContentType?: string;
+  /** Si es `true`, aparece en el feed público de `/app`. */
+  published: boolean;
+  createdAt: string;
+  updatedAt: string;
+  /** Id del admin que creó el evento (auditoría). */
+  createdByUserId: string;
+  /** Id del admin que actualizó el evento por última vez. */
+  updatedByUserId?: string;
 }
 
 export interface PublicUser {

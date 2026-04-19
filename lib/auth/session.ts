@@ -37,14 +37,19 @@ export async function verifySessionToken(
   }
 }
 
-export async function setSessionCookie(token: string): Promise<void> {
+export async function setSessionCookie(
+  token: string,
+  options?: { persistent?: boolean },
+): Promise<void> {
   const store = await cookies();
+  const persistent = options?.persistent ?? true;
   store.set(COOKIE, token, {
     httpOnly: true,
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",
     path: "/",
-    maxAge: 60 * 60 * 24 * 30,
+    // Sin `maxAge` la cookie es de sesión y caduca al cerrar el navegador.
+    ...(persistent ? { maxAge: 60 * 60 * 24 * 30 } : {}),
   });
 }
 
