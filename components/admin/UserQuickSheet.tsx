@@ -1,5 +1,7 @@
 "use client";
 
+import type { ReactNode } from "react";
+import { PackageCheckIcon } from "@/components/icons/PackageCheckIcon";
 import type { SafeUser } from "./AdminUsersClient";
 
 type Props = {
@@ -9,6 +11,11 @@ type Props = {
   onClose: () => void;
   onActivate: (user: SafeUser) => void;
   onDelivery: (user: SafeUser, action: "deliver" | "undo") => void;
+  /**
+   * Si es true, el backdrop no recibe punteros (p. ej. con un diálogo de
+   * confirmación encima, evita cierres fantasma al confirmar).
+   */
+  backdropPointerEventsNone?: boolean;
 };
 
 const SEX_LABEL: Record<string, string> = {
@@ -41,20 +48,20 @@ function formatDate(iso: string | undefined | null): string {
 function StatusBadge({ user }: { user: SafeUser }) {
   if (user.status === "pending_payment") {
     return (
-      <span className="inline-flex items-center rounded-full bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700 ring-1 ring-inset ring-amber-200">
+      <span className="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700 ring-1 ring-inset ring-amber-200">
         Pendiente pago
       </span>
     );
   }
   if (user.status === "inactive") {
     return (
-      <span className="inline-flex items-center rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-medium text-zinc-700 ring-1 ring-inset ring-zinc-200">
+      <span className="inline-flex items-center rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-medium text-zinc-700 ring-1 ring-inset ring-zinc-200">
         Inactivo
       </span>
     );
   }
   return (
-    <span className="inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 ring-1 ring-inset ring-emerald-200">
+    <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700 ring-1 ring-inset ring-emerald-200">
       Activo
     </span>
   );
@@ -62,32 +69,45 @@ function StatusBadge({ user }: { user: SafeUser }) {
 
 function DeliveryBadge({ user }: { user: SafeUser }) {
   if (user.status !== "active") {
-    return <span className="text-sm text-muted">—</span>;
+    return <span className="text-xs text-muted">—</span>;
   }
   const delivered = user.deliveryStatus === "delivered";
   return delivered ? (
-    <span className="inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 ring-1 ring-inset ring-emerald-200">
+    <span className="inline-flex max-w-full items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700 ring-1 ring-inset ring-emerald-200">
       Entregado
       {user.deliveredAt ? (
-        <span className="ml-1 font-normal text-emerald-600">
+        <span className="ml-1 shrink-0 font-normal text-emerald-600">
           {formatDate(user.deliveredAt)}
         </span>
       ) : null}
     </span>
   ) : (
-    <span className="inline-flex items-center rounded-full bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700 ring-1 ring-inset ring-amber-200">
+    <span className="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700 ring-1 ring-inset ring-amber-200">
       Pendiente
     </span>
   );
 }
 
+function Field({
+  label,
+  children,
+}: {
+  label: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="min-w-0">
+      <dt className="text-[11px] font-medium uppercase tracking-wide text-muted">
+        {label}
+      </dt>
+      <dd className="mt-0.5 text-sm leading-snug text-foreground">{children}</dd>
+    </div>
+  );
+}
+
 /**
- * Ficha flotante con los datos del socio escaneado y los botones de acción
- * (Activar / Renovar / Marcar entregado / Deshacer entrega), que reutilizan
- * los mismos endpoints que la tabla principal.
- *
- * Se abre tras escanear un QR desde el panel admin y se cierra automáticamente
- * cuando la acción finaliza correctamente.
+ * Ficha flotante con los datos del socio escaneado y acciones (activar, renovar,
+ * entrega). Misma lógica que la tabla del panel admin.
  */
 export function UserQuickSheet({
   user,
@@ -95,6 +115,7 @@ export function UserQuickSheet({
   onClose,
   onActivate,
   onDelivery,
+  backdropPointerEventsNone = false,
 }: Props) {
   if (!user) return null;
 
@@ -105,7 +126,9 @@ export function UserQuickSheet({
 
   return (
     <div
-      className="fixed inset-0 z-40 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4"
+      className={`fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-3 sm:p-4 ${
+        backdropPointerEventsNone ? "pointer-events-none" : ""
+      }`}
       role="dialog"
       aria-modal="true"
       aria-label={`Ficha de ${user.name}`}
@@ -113,133 +136,108 @@ export function UserQuickSheet({
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-lg rounded-t-2xl bg-card shadow-xl sm:rounded-2xl"
+        className="pointer-events-auto flex max-h-[min(90dvh,720px)] w-full max-w-[42rem] flex-col overflow-hidden rounded-2xl bg-card shadow-xl sm:w-[75vw]"
       >
-        <div className="flex items-start justify-between gap-3 border-b border-border px-5 py-4">
-          <div>
-            <p className="text-xs font-medium uppercase tracking-wide text-muted">
-              Socio
-            </p>
-            <p className="mt-0.5 font-mono text-lg">
-              {user.membershipId ?? "—"}
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-full px-3 py-1 text-sm text-muted hover:bg-zinc-100 hover:text-foreground"
-            aria-label="Cerrar"
-          >
-            Cerrar
-          </button>
-        </div>
-
-        <dl className="grid grid-cols-1 gap-4 px-5 py-5 sm:grid-cols-2">
-          <div>
-            <dt className="text-xs font-medium uppercase tracking-wide text-muted">
-              Nombre
-            </dt>
-            <dd className="mt-1 text-[15px]">{user.name}</dd>
-          </div>
-          <div>
-            <dt className="text-xs font-medium uppercase tracking-wide text-muted">
-              Email
-            </dt>
-            <dd className="mt-1 break-all text-[15px]">{user.email}</dd>
-          </div>
-          <div>
-            <dt className="text-xs font-medium uppercase tracking-wide text-muted">
-              Teléfono
-            </dt>
-            <dd className="mt-1 text-[15px]">{user.phone ?? "—"}</dd>
-          </div>
-          {user.sex ? (
-            <div>
-              <dt className="text-xs font-medium uppercase tracking-wide text-muted">
-                Sexo
-              </dt>
-              <dd className="mt-1 text-[15px]">
-                {SEX_LABEL[user.sex] ?? user.sex}
-              </dd>
+        <header className="shrink-0 border-b border-border px-4 py-3">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <p className="text-[11px] font-medium uppercase tracking-wide text-muted">
+                Socio
+              </p>
+              <p className="font-mono text-sm leading-tight text-foreground">
+                {user.membershipId ?? "—"}
+              </p>
+              <p className="mt-1 text-base font-semibold leading-snug text-foreground">
+                {user.name}
+              </p>
+              <p className="mt-0.5 break-all text-xs text-muted">{user.email}</p>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                <StatusBadge user={user} />
+                <DeliveryBadge user={user} />
+              </div>
             </div>
-          ) : null}
-          <div>
-            <dt className="text-xs font-medium uppercase tracking-wide text-muted">
-              Estado
-            </dt>
-            <dd className="mt-1">
-              <StatusBadge user={user} />
-            </dd>
-          </div>
-          <div>
-            <dt className="text-xs font-medium uppercase tracking-wide text-muted">
-              Importe
-            </dt>
-            <dd className="mt-1 font-mono text-[15px]">
-              {formatEuros(user.paidAmount)}
-            </dd>
-          </div>
-          <div>
-            <dt className="text-xs font-medium uppercase tracking-wide text-muted">
-              Entrega
-            </dt>
-            <dd className="mt-1">
-              <DeliveryBadge user={user} />
-            </dd>
-          </div>
-          <div>
-            <dt className="text-xs font-medium uppercase tracking-wide text-muted">
-              Alta
-            </dt>
-            <dd className="mt-1 text-[15px]">{formatDate(user.createdAt)}</dd>
-          </div>
-        </dl>
-
-        <div className="flex flex-wrap justify-end gap-2 border-t border-border bg-zinc-50 px-5 py-4">
-          {user.status === "pending_payment" || user.status === "inactive" ? (
             <button
               type="button"
-              disabled={busy}
-              onClick={() => onActivate(user)}
-              className="inline-flex items-center rounded-full bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-hover disabled:opacity-60"
+              onClick={onClose}
+              className="shrink-0 rounded-full px-3 py-1.5 text-sm text-muted hover:bg-zinc-100 hover:text-foreground"
+              aria-label="Cerrar"
             >
-              {busy ? "Activando…" : "Activar"}
+              Cerrar
             </button>
-          ) : null}
+          </div>
+        </header>
 
-          {user.status === "active" && !paidThisYear ? (
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => onActivate(user)}
-              className="inline-flex items-center rounded-full border border-border bg-white px-4 py-2 text-sm font-medium text-foreground hover:bg-zinc-50 disabled:opacity-60"
-            >
-              {busy ? "…" : "Renovar"}
-            </button>
-          ) : null}
-
-          {user.status === "active" ? (
-            delivered ? (
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => onDelivery(user, "undo")}
-                className="inline-flex items-center rounded-full border border-border bg-white px-4 py-2 text-sm font-medium text-foreground hover:bg-zinc-50 disabled:opacity-60"
-              >
-                {busy ? "…" : "Deshacer entrega"}
-              </button>
-            ) : (
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => onDelivery(user, "deliver")}
-                className="inline-flex items-center rounded-full bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-60"
-              >
-                {busy ? "Guardando…" : "Marcar entregado"}
-              </button>
-            )
-          ) : null}
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+          <dl className="grid grid-cols-2 gap-x-3 gap-y-2.5 sm:grid-cols-3">
+            <Field label="Teléfono">{user.phone ?? "—"}</Field>
+            <Field label="Sexo">
+              {user.sex ? SEX_LABEL[user.sex] ?? user.sex : "—"}
+            </Field>
+            <Field label="Año nac.">{user.birthYear ?? "—"}</Field>
+            <Field label="Importe">
+              <span className="font-mono tabular-nums">
+                {formatEuros(user.paidAmount)}
+              </span>
+            </Field>
+            <Field label="Admin">{user.isAdmin ? "Sí" : "—"}</Field>
+            <Field label="Alta">{formatDate(user.createdAt)}</Field>
+          </dl>
         </div>
+
+        <footer className="shrink-0 border-t border-border bg-zinc-50 px-4 py-3">
+          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-end">
+            {user.status === "pending_payment" || user.status === "inactive" ? (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => onActivate(user)}
+                className="inline-flex min-h-[44px] items-center justify-center rounded-xl bg-brand px-4 text-sm font-medium text-white hover:bg-brand-hover disabled:opacity-60 sm:min-h-0 sm:px-5 sm:py-2.5"
+              >
+                {busy ? "Activando…" : "Activar"}
+              </button>
+            ) : null}
+
+            {user.status === "active" && !paidThisYear ? (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => onActivate(user)}
+                className="inline-flex min-h-[44px] items-center justify-center rounded-xl border border-border bg-white px-4 text-sm font-medium text-foreground hover:bg-zinc-50 disabled:opacity-60 sm:min-h-0 sm:px-5 sm:py-2.5"
+              >
+                {busy ? "…" : "Renovar"}
+              </button>
+            ) : null}
+
+            {user.status === "active" ? (
+              delivered ? (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => onDelivery(user, "undo")}
+                  className="inline-flex min-h-[44px] items-center justify-center rounded-xl border border-border bg-white px-4 text-sm font-medium text-foreground hover:bg-zinc-50 disabled:opacity-60 sm:min-h-0 sm:px-5 sm:py-2.5"
+                >
+                  {busy ? "…" : "Deshacer entrega"}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => onDelivery(user, "deliver")}
+                  className="inline-flex min-h-[48px] w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:opacity-60 sm:ml-0 sm:w-auto sm:min-w-[12rem]"
+                >
+                  {busy ? (
+                    "Guardando…"
+                  ) : (
+                    <>
+                      <PackageCheckIcon className="h-5 w-5 shrink-0" />
+                      Marcar entregado
+                    </>
+                  )}
+                </button>
+              )
+            ) : null}
+          </div>
+        </footer>
       </div>
     </div>
   );

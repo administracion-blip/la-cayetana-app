@@ -3,13 +3,21 @@ import { z } from "zod";
 import { requireAdminForApi } from "@/lib/auth/admin";
 import {
   BonoDeliveryError,
+  getUserById,
   markUserBonoDelivered,
   markUserBonoPending,
 } from "@/lib/repositories/users";
 
-const bodySchema = z.object({
-  action: z.enum(["deliver", "undo"]),
-});
+const bodySchema = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("deliver") }),
+  z.object({
+    action: z.literal("undo"),
+    authorizerUserId: z.string().min(1),
+  }),
+]);
+
+const UNAUTHORIZED_UNDO =
+  "No dispones de la autorización necesaria para esta acción.";
 
 export async function POST(
   req: Request,
@@ -42,6 +50,17 @@ export async function POST(
   }
 
   try {
+    if (parsed.data.action === "undo") {
+      const authorizer = await getUserById(parsed.data.authorizerUserId);
+      if (
+        !authorizer ||
+        authorizer.entityType !== "USER" ||
+        !authorizer.isAdmin
+      ) {
+        return NextResponse.json({ error: UNAUTHORIZED_UNDO }, { status: 403 });
+      }
+    }
+
     const user =
       parsed.data.action === "deliver"
         ? await markUserBonoDelivered({

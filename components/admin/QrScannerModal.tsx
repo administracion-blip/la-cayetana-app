@@ -13,6 +13,10 @@ type Props = {
    * Tras la primera detección el modal pausa el escáner (modo one-shot).
    */
   onResult: (text: string) => void;
+  /** Título de la cabecera (p. ej. autorización de deshacer entrega). */
+  title?: string;
+  /** Texto de ayuda bajo la vista de cámara. */
+  hint?: string;
 };
 
 /**
@@ -78,7 +82,13 @@ function preflightCheck(): string | null {
   return null;
 }
 
-export function QrScannerModal({ open, onClose, onResult }: Props) {
+export function QrScannerModal({
+  open,
+  onClose,
+  onResult,
+  title = "Escanear QR de socio",
+  hint = "Apunta la cámara al QR del carnet del socio",
+}: Props) {
   const [error, setError] = useState<string | null>(null);
   const [paused, setPaused] = useState(false);
   const firedRef = useRef(false);
@@ -182,8 +192,26 @@ export function QrScannerModal({ open, onClose, onResult }: Props) {
             constraints={{ facingMode: "environment" }}
             components={{ finder: true, torch: true, zoom: false, onOff: false }}
             styles={{
-              container: { width: "100%", height: "100%" },
-              video: { width: "100%", height: "100%", objectFit: "cover" },
+              // La librería aplica por defecto aspectRatio "1/1"; si no lo anulamos,
+              // en móvil vertical el recorte + objectFit cover parece un zoom molesto
+              // y el marco del finder queda mal posicionado.
+              container: {
+                width: "100%",
+                height: "100%",
+                aspectRatio: "unset",
+                maxHeight: "100%",
+                position: "relative",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                overflow: "hidden",
+              },
+              video: {
+                width: "100%",
+                height: "100%",
+                objectFit: "contain",
+                backgroundColor: "#000",
+              },
             }}
           />
         )}
@@ -191,7 +219,7 @@ export function QrScannerModal({ open, onClose, onResult }: Props) {
         {!error ? (
           <div className="pointer-events-none absolute inset-x-0 bottom-6 flex justify-center px-6">
             <p className="rounded-full bg-black/60 px-4 py-2 text-xs text-white shadow">
-              Apunta la cámara al QR del carnet del socio
+              {hint}
             </p>
           </div>
         ) : null}

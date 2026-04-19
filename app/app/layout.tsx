@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { CarnetFab } from "@/components/app/CarnetFab";
-import { Logo } from "@/components/brand/Logo";
+import { AppHeaderMenu } from "@/components/app/AppHeaderMenu";
+import { CarnetHeaderButton } from "@/components/app/CarnetHeaderButton";
 import { getSessionFromCookies } from "@/lib/auth/session";
 import { getUserById } from "@/lib/repositories/users";
 
@@ -22,47 +22,26 @@ export default async function PrivateLayout({
   return (
     <div className="flex min-h-full flex-col">
       <header className="sticky top-0 z-10 border-b border-border bg-white">
-        <div className="mx-auto flex max-w-lg flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="mx-auto flex max-w-lg items-center gap-2 px-4 py-3 sm:gap-3">
+          <AppHeaderMenu isAdmin={user.isAdmin === true} />
           <Link
             href="/app"
             aria-label="La Cayetana Granada"
-            className="flex items-center gap-3"
+            className="flex min-w-0 flex-1 flex-col justify-center leading-tight"
           >
-            <Logo height={36} />
-            <span className="flex flex-col leading-tight">
-              <span className="text-sm font-semibold">La Cayetana</span>
-              <span className="text-xs text-muted">Hola, {firstName}</span>
+            <span className="truncate text-sm font-semibold">La Cayetana</span>
+            <span className="truncate text-xs text-muted">
+              Hola, {firstName}
             </span>
           </Link>
-          <nav className="flex flex-wrap items-center gap-3 text-sm font-medium">
-            <Link href="/app" className="text-muted hover:text-foreground">
-              Feed
-            </Link>
-            <Link href="/app/card" className="text-muted hover:text-foreground">
-              Carnet
-            </Link>
-            <Link
-              href="/app/profile"
-              className="text-muted hover:text-foreground"
-            >
-              Perfil
-            </Link>
-            {user.isAdmin ? (
-              <Link
-                href="/admin"
-                className="text-brand hover:text-brand-hover"
-              >
-                Admin
-              </Link>
-            ) : null}
-          </nav>
+          <div className="flex shrink-0 justify-end">
+            <CarnetHeaderButton />
+          </div>
         </div>
       </header>
-      <main className="mx-auto w-full max-w-lg flex-1 px-4 py-6 pb-36">
+      <main className="mx-auto w-full max-w-lg flex-1 px-4 py-6 pb-10">
         {children}
       </main>
-
-      <CarnetFab />
     </div>
   );
 }
