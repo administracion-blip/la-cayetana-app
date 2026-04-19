@@ -4,9 +4,12 @@ frontend:
     preBuild:
       commands:
         - npm ci --cache .npm --prefer-offline
+        # Exponer las env vars configuradas en la consola de Amplify al runtime
+        # SSR: Next.js solo las incluye en la Lambda si existen en un archivo
+        # .env.production en tiempo de build. Solo se filtran las que usa la app.
+        - env | grep -E '^(AWS_REGION|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|USERS_TABLE_NAME|POSTS_TABLE_NAME|PROGRAMACION_TABLE_NAME|PROGRAMACION_S3_BUCKET|STRIPE_SECRET_KEY|STRIPE_WEBHOOK_SECRET|SESSION_SECRET|SES_FROM_EMAIL|NEXT_PUBLIC_)=' >> .env.production
     build:
       commands:
-        - env | grep -E '^NEXT_PUBLIC_' | sort || true
         - npm run build
   artifacts:
     baseDirectory: .next
