@@ -37,9 +37,10 @@ export async function sendWelcomeRegistrationEmail(input: {
     "— La Cayetana · Granada",
   );
 
-  return sendSesPlainTextEmail({
+  const result = await sendSesPlainTextEmail({
     to: input.toEmail,
     subject: "Tu carnet digital — La Cayetana",
     body: lines.join("\n"),
   });
+  return result.ok;
 }
