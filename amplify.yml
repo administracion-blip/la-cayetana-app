@@ -6,8 +6,12 @@ frontend:
         - npm ci --cache .npm --prefer-offline
         # Exponer las env vars configuradas en la consola de Amplify al runtime
         # SSR: Next.js solo las incluye en la Lambda si existen en un archivo
-        # .env.production en tiempo de build. Solo se filtran las que usa la app.
-        - env | grep -E '^(AWS_REGION|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|USERS_TABLE_NAME|POSTS_TABLE_NAME|PROGRAMACION_TABLE_NAME|PROGRAMACION_S3_BUCKET|STRIPE_SECRET_KEY|STRIPE_WEBHOOK_SECRET|SESSION_SECRET|SES_FROM_EMAIL|NEXT_PUBLIC_)=' >> .env.production
+        # .env.production en tiempo de build.
+        # Importante: NO filtramos AWS_* porque en runtime Lambda las inyecta
+        # automáticamente desde el IAM role (AWS_REGION, AWS_ACCESS_KEY_ID,
+        # AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN). Si las empotráramos aquí
+        # con valores del build, sobrescribirían las credenciales del role.
+        - env | grep -E '^(USERS_TABLE_NAME|POSTS_TABLE_NAME|PROGRAMACION_TABLE_NAME|PROGRAMACION_S3_BUCKET|STRIPE_SECRET_KEY|STRIPE_WEBHOOK_SECRET|SESSION_SECRET|SES_FROM_EMAIL|NEXT_PUBLIC_)=' >> .env.production
     build:
       commands:
         - npm run build
