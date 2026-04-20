@@ -63,7 +63,7 @@ export function PrivacyPolicyModal({ open, onClose }: Props) {
                 servicio de carnet digital y fidelización de socios. Para
                 ejercer sus derechos o realizar consultas sobre privacidad,
                 puede utilizarse el canal de contacto indicado en la web o en
-                la caseta del club.
+                la caseta La Cayetana.
               </p>
             </section>
             <section>

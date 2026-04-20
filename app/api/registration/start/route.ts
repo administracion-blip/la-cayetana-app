@@ -94,7 +94,7 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           error:
-            "El plazo para conseguir el carnet en línea ha finalizado. Si necesitas ayuda, contacta con el club.",
+            "El plazo para conseguir el carnet en línea ha finalizado. Si necesitas ayuda, contacta a través de lacayetanagranada@gmail.com.",
         },
         { status: 403 },
       );

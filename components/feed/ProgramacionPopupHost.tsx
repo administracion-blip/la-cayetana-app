@@ -110,15 +110,6 @@ export function ProgramacionPopupHost() {
     };
   }, [tryFetchAndShow]);
 
-  useEffect(() => {
-    if (!event) return;
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setEvent(null);
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [event]);
-
   if (!event) return null;
 
   const when = formatStartAt(event.startAt);
@@ -129,12 +120,8 @@ export function ProgramacionPopupHost() {
       role="dialog"
       aria-modal="true"
       aria-labelledby={titleId}
-      onClick={() => setEvent(null)}
     >
-      <div
-        className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-      >
+      <div className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl">
         <div className="relative aspect-[16/9] w-full overflow-hidden bg-zinc-100">
           {/* eslint-disable-next-line @next/next/no-img-element -- imagen servida por /api/programacion/image */}
           <img
@@ -177,15 +164,6 @@ export function ProgramacionPopupHost() {
           <p className="mt-2 whitespace-pre-line text-[15px] leading-relaxed text-muted">
             {event.description}
           </p>
-          <div className="mt-4 flex justify-end">
-            <button
-              type="button"
-              onClick={() => setEvent(null)}
-              className="inline-flex min-h-11 items-center justify-center rounded-full bg-brand px-5 text-sm font-medium text-white hover:bg-brand-hover"
-            >
-              Entendido
-            </button>
-          </div>
         </div>
       </div>
     </div>

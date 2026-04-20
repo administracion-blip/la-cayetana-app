@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
 import { QrScanIcon } from "@/components/icons/QrScanIcon";
 import type { UserRecord } from "@/types/models";
 import { AdminAuthDeniedDialog } from "./AdminAuthDeniedDialog";
@@ -24,7 +31,29 @@ export type SafeUser = Omit<UserRecord, "passwordHash">;
 type PendingConfirm =
   | null
   | { kind: "activate"; user: SafeUser }
-  | { kind: "delivery"; user: SafeUser };
+  | { kind: "delivery"; user: SafeUser }
+  | { kind: "bulkDeliver"; users: SafeUser[] }
+  | { kind: "bulkActivate"; users: SafeUser[] };
+
+/** Activo con bono pendiente de entregar (misma condición que “Marcar entregado” por fila). */
+function canBulkDeliver(u: SafeUser): boolean {
+  return (
+    u.status === "active" &&
+    (u.deliveryStatus ?? "pending") === "pending"
+  );
+}
+
+/** Misma lógica que los botones Activar / Renovar por fila. */
+function canBulkActivate(u: SafeUser): boolean {
+  if (u.status === "pending_payment" || u.status === "inactive") return true;
+  if (u.status === "active") {
+    const y = new Date().getUTCFullYear();
+    const paidThisYear =
+      u.paidAt && new Date(u.paidAt).getUTCFullYear() === y;
+    return !paidThisYear;
+  }
+  return false;
+}
 
 type SortKey =
   | "membershipId"
@@ -37,6 +66,7 @@ type SortKey =
   | "paidAmount"
   | "deliveryStatus"
   | "isAdmin"
+  | "canValidatePrizes"
   | "createdAt";
 
 const COLUMNS: { key: SortKey; label: string }[] = [
@@ -50,6 +80,7 @@ const COLUMNS: { key: SortKey; label: string }[] = [
   { key: "paidAmount", label: "Importe" },
   { key: "deliveryStatus", label: "Entrega" },
   { key: "isAdmin", label: "Admin" },
+  { key: "canValidatePrizes", label: "Validador" },
   { key: "createdAt", label: "Alta" },
 ];
 
@@ -64,6 +95,7 @@ const DEFAULT_WIDTHS: Record<SortKey, number> = {
   paidAmount: 76,
   deliveryStatus: 160,
   isAdmin: 56,
+  canValidatePrizes: 112,
   createdAt: 124,
 };
 
@@ -125,6 +157,11 @@ function compareUsers(
       const vb = b.isAdmin ? 1 : 0;
       return (va - vb) * mul;
     }
+    case "canValidatePrizes": {
+      const va = a.canValidatePrizes ? 1 : 0;
+      const vb = b.canValidatePrizes ? 1 : 0;
+      return (va - vb) * mul;
+    }
     case "createdAt":
       return (
         (new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()) * mul
@@ -158,6 +195,10 @@ export function AdminUsersClient({ users }: { users: SafeUser[] }) {
   const [pendingConfirm, setPendingConfirm] = useState<PendingConfirm>(null);
   const [mobileSortOpen, setMobileSortOpen] = useState(false);
   const [, startTransition] = useTransition();
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const selectAllCheckboxRef = useRef<HTMLInputElement>(null);
 
   const sortColumnLabel = useMemo(
     () => COLUMNS.find((c) => c.key === sortKey)?.label ?? sortKey,
@@ -204,6 +245,73 @@ export function AdminUsersClient({ users }: { users: SafeUser[] }) {
     copy.sort((a, b) => compareUsers(a, b, sortKey, sortDir));
     return copy;
   }, [filtered, sortKey, sortDir]);
+
+  const selectedInViewCount = useMemo(
+    () => sorted.filter((u) => selectedIds.has(u.id)).length,
+    [sorted, selectedIds],
+  );
+
+  const selectedUsers = useMemo(
+    () => rows.filter((u) => selectedIds.has(u.id)),
+    [rows, selectedIds],
+  );
+
+  const bulkDeliverCandidates = useMemo(
+    () => selectedUsers.filter(canBulkDeliver),
+    [selectedUsers],
+  );
+
+  const bulkActivateCandidates = useMemo(
+    () => selectedUsers.filter(canBulkActivate),
+    [selectedUsers],
+  );
+
+  useEffect(() => {
+    const el = selectAllCheckboxRef.current;
+    if (!el) return;
+    el.indeterminate =
+      selectedInViewCount > 0 && selectedInViewCount < sorted.length;
+  }, [selectedInViewCount, sorted.length]);
+
+  /** Selección masiva solo en tablet y escritorio (≥ md); en teléfono se limpia al redimensionar. */
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 768px)");
+    const clearIfPhone = () => {
+      if (!mq.matches) setSelectedIds(new Set());
+    };
+    clearIfPhone();
+    mq.addEventListener("change", clearIfPhone);
+    return () => mq.removeEventListener("change", clearIfPhone);
+  }, []);
+
+  const toggleSelectOne = useCallback((id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const toggleSelectAllVisible = useCallback(() => {
+    const ids = sorted.map((u) => u.id);
+    setSelectedIds((prev) => {
+      const allSelected =
+        ids.length > 0 && ids.every((id) => prev.has(id));
+      if (allSelected) {
+        const next = new Set(prev);
+        ids.forEach((id) => next.delete(id));
+        return next;
+      }
+      const next = new Set(prev);
+      ids.forEach((id) => next.add(id));
+      return next;
+    });
+  }, [sorted]);
+
+  const clearSelection = useCallback(() => {
+    setSelectedIds(new Set());
+  }, []);
 
   const pendingPaymentCount = useMemo(
     () => rows.filter((u) => u.status === "pending_payment").length,
@@ -263,7 +371,7 @@ export function AdminUsersClient({ users }: { users: SafeUser[] }) {
     };
   }, []);
 
-  const runActivate = useCallback(async (user: SafeUser) => {
+  const runActivate = useCallback(async (user: SafeUser): Promise<boolean> => {
     setError(null);
     setPendingId(user.id);
     try {
@@ -291,7 +399,7 @@ export function AdminUsersClient({ users }: { users: SafeUser[] }) {
         | null;
       if (!res.ok || !data?.ok) {
         setError(data?.error ?? "No se pudo activar al usuario");
-        return;
+        return false;
       }
       startTransition(() => {
         setRows((prev) =>
@@ -312,9 +420,11 @@ export function AdminUsersClient({ users }: { users: SafeUser[] }) {
           ),
         );
       });
+      return true;
     } catch (e) {
       console.error(e);
       setError("Error de red al activar al usuario");
+      return false;
     } finally {
       setPendingId(null);
     }
@@ -329,7 +439,7 @@ export function AdminUsersClient({ users }: { users: SafeUser[] }) {
       user: SafeUser,
       action: "deliver" | "undo",
       authorizerUserId?: string,
-    ) => {
+    ): Promise<boolean> => {
       setError(null);
       setPendingId(user.id);
       try {
@@ -365,7 +475,7 @@ export function AdminUsersClient({ users }: { users: SafeUser[] }) {
           } else {
             setError(data?.error ?? "No se pudo actualizar la entrega");
           }
-          return;
+          return false;
         }
         startTransition(() => {
           setRows((prev) =>
@@ -382,9 +492,11 @@ export function AdminUsersClient({ users }: { users: SafeUser[] }) {
             ),
           );
         });
+        return true;
       } catch (e) {
         console.error(e);
         setError("Error de red al actualizar la entrega");
+        return false;
       } finally {
         setPendingId(null);
       }
@@ -402,6 +514,89 @@ export function AdminUsersClient({ users }: { users: SafeUser[] }) {
       setPendingConfirm({ kind: "delivery", user });
     },
     [],
+  );
+
+  const runValidatorToggle = useCallback(
+    async (user: SafeUser, next: boolean): Promise<boolean> => {
+      setError(null);
+      setPendingId(user.id);
+      try {
+        const res = await fetch(
+          `/api/admin/users/${encodeURIComponent(user.id)}/validator`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ canValidatePrizes: next }),
+          },
+        );
+        const data = (await res.json().catch(() => null)) as
+          | { ok?: boolean; error?: string }
+          | null;
+        if (!res.ok || !data?.ok) {
+          setError(
+            data?.error ?? "No se pudo actualizar el estado de validador",
+          );
+          return false;
+        }
+        startTransition(() => {
+          setRows((prev) =>
+            prev.map((u) =>
+              u.id === user.id ? { ...u, canValidatePrizes: next } : u,
+            ),
+          );
+        });
+        return true;
+      } catch (e) {
+        console.error(e);
+        setError("Error de red al actualizar el estado de validador");
+        return false;
+      } finally {
+        setPendingId(null);
+      }
+    },
+    [],
+  );
+
+  const runBulkDeliver = useCallback(
+    async (users: SafeUser[]) => {
+      let ok = 0;
+      let fail = 0;
+      for (const u of users) {
+        const success = await runDelivery(u, "deliver");
+        if (success) ok++;
+        else fail++;
+      }
+      if (fail > 0 && ok === 0) {
+        setError(
+          "No se pudo completar la entrega masiva. Revisa el mensaje anterior.",
+        );
+      } else if (fail > 0) {
+        setError(`Entrega masiva: ${ok} correcto(s), ${fail} fallido(s).`);
+      }
+      clearSelection();
+    },
+    [runDelivery, clearSelection],
+  );
+
+  const runBulkActivate = useCallback(
+    async (users: SafeUser[]) => {
+      let ok = 0;
+      let fail = 0;
+      for (const u of users) {
+        const success = await runActivate(u);
+        if (success) ok++;
+        else fail++;
+      }
+      if (fail > 0 && ok === 0) {
+        setError(
+          "No se pudo completar la activación masiva. Revisa el mensaje anterior.",
+        );
+      } else if (fail > 0) {
+        setError(`Activación masiva: ${ok} correcto(s), ${fail} fallido(s).`);
+      }
+      clearSelection();
+    },
+    [runActivate, clearSelection],
   );
 
   const handleScanResult = useCallback(
@@ -588,6 +783,38 @@ export function AdminUsersClient({ users }: { users: SafeUser[] }) {
         return (
           <span className="text-muted">{u.isAdmin ? "Sí" : "—"}</span>
         );
+      case "canValidatePrizes": {
+        if (u.status !== "active") {
+          return <span className="text-muted">—</span>;
+        }
+        const busy = pendingId === u.id;
+        const enabled = Boolean(u.canValidatePrizes);
+        return (
+          <button
+            type="button"
+            role="switch"
+            aria-checked={enabled}
+            disabled={busy}
+            onClick={() => void runValidatorToggle(u, !enabled)}
+            className={`inline-flex h-6 w-11 shrink-0 items-center rounded-full border transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-500 disabled:opacity-50 ${
+              enabled
+                ? "border-amber-300 bg-amber-400"
+                : "border-border bg-zinc-200"
+            }`}
+            title={
+              enabled
+                ? "Validador activo: puede canjear premios en taquilla"
+                : "Marcar como validador de canjes en taquilla"
+            }
+          >
+            <span
+              className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${
+                enabled ? "translate-x-5" : "translate-x-0.5"
+              }`}
+            />
+          </button>
+        );
+      }
       case "createdAt":
         return (
           <span className="whitespace-nowrap text-muted">
@@ -598,6 +825,9 @@ export function AdminUsersClient({ users }: { users: SafeUser[] }) {
         return null;
     }
   }
+
+  const allVisibleSelected =
+    sorted.length > 0 && selectedInViewCount === sorted.length;
 
   return (
     <div>
@@ -698,6 +928,64 @@ export function AdminUsersClient({ users }: { users: SafeUser[] }) {
         </div>
       </div>
 
+      {selectedUsers.length > 0 ? (
+        <div className="mb-4 hidden flex-col gap-2 rounded-xl border border-brand/25 bg-brand/5 px-3 py-2.5 text-sm md:flex sm:flex-row sm:flex-wrap sm:items-center">
+          <span className="font-medium text-foreground">
+            {selectedUsers.length}{" "}
+            {selectedUsers.length === 1
+              ? "socio seleccionado"
+              : "socios seleccionados"}
+          </span>
+          <span className="text-muted">
+            ({selectedInViewCount} en la vista actual)
+          </span>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              disabled={
+                bulkDeliverCandidates.length === 0 || pendingId !== null
+              }
+              onClick={() =>
+                setPendingConfirm({
+                  kind: "bulkDeliver",
+                  users: bulkDeliverCandidates,
+                })
+              }
+              className="rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-900 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Marcar entregado ({bulkDeliverCandidates.length})
+            </button>
+            <button
+              type="button"
+              disabled={
+                bulkActivateCandidates.length === 0 || pendingId !== null
+              }
+              onClick={() =>
+                setPendingConfirm({
+                  kind: "bulkActivate",
+                  users: bulkActivateCandidates,
+                })
+              }
+              className="rounded-lg border border-border bg-white px-2.5 py-1 text-xs font-medium text-foreground hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Activar / renovar ({bulkActivateCandidates.length})
+            </button>
+            <button
+              type="button"
+              onClick={clearSelection}
+              className="rounded-lg border border-border bg-white px-2.5 py-1 text-xs font-medium text-muted-foreground hover:bg-zinc-50"
+            >
+              Quitar selección
+            </button>
+          </div>
+          <p className="w-full text-xs text-muted">
+            «Marcar entregado» y «Activar / renovar» solo afectan a los
+            seleccionados que cumplan las condiciones de cada acción (igual que
+            los botones en cada fila).
+          </p>
+        </div>
+      ) : null}
+
       {error ? (
         <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">
           {error}
@@ -787,15 +1075,26 @@ export function AdminUsersClient({ users }: { users: SafeUser[] }) {
             key={u.id}
             className="rounded-xl border border-border bg-card p-4 shadow-sm"
           >
-            <p className="font-mono text-xs text-muted">
-              {cellValue(u, "membershipId")}
-            </p>
-            <h3 className="mt-1 text-base font-semibold leading-snug text-foreground">
-              {cellValue(u, "name")}
-            </h3>
-            <p className="mt-1 break-all text-sm text-muted">
-              {cellValue(u, "email")}
-            </p>
+            <div className="flex items-start gap-3">
+              <input
+                type="checkbox"
+                checked={selectedIds.has(u.id)}
+                onChange={() => toggleSelectOne(u.id)}
+                className="mt-1 hidden h-4 w-4 shrink-0 accent-brand md:block"
+                aria-label={`Seleccionar ${u.name}`}
+              />
+              <div className="min-w-0 flex-1">
+                <p className="font-mono text-xs text-muted">
+                  {cellValue(u, "membershipId")}
+                </p>
+                <h3 className="mt-1 text-base font-semibold leading-snug text-foreground">
+                  {cellValue(u, "name")}
+                </h3>
+                <p className="mt-1 break-all text-sm text-muted">
+                  {cellValue(u, "email")}
+                </p>
+              </div>
+            </div>
             <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2 text-sm">
               <div>
                 <dt className="text-xs text-muted">Teléfono</dt>
@@ -847,6 +1146,21 @@ export function AdminUsersClient({ users }: { users: SafeUser[] }) {
         >
           <thead className="border-b border-border bg-zinc-50">
             <tr>
+              <th
+                scope="col"
+                className="w-10 px-1 py-1.5 align-middle font-medium"
+              >
+                <input
+                  ref={selectAllCheckboxRef}
+                  type="checkbox"
+                  checked={allVisibleSelected}
+                  onChange={toggleSelectAllVisible}
+                  disabled={sorted.length === 0}
+                  className="h-4 w-4 accent-brand disabled:opacity-40"
+                  aria-label="Seleccionar todos los socios visibles en la tabla"
+                  title="Seleccionar o deseleccionar la vista actual"
+                />
+              </th>
               {COLUMNS.map(({ key, label }) => (
                 <th
                   key={key}
@@ -888,6 +1202,15 @@ export function AdminUsersClient({ users }: { users: SafeUser[] }) {
           <tbody>
             {sorted.map((u) => (
               <tr key={u.id} className="border-b border-border last:border-0">
+                <td className="w-10 px-1 py-1.5 align-top">
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.has(u.id)}
+                    onChange={() => toggleSelectOne(u.id)}
+                    className="h-4 w-4 accent-brand"
+                    aria-label={`Seleccionar ${u.name}`}
+                  />
+                </td>
                 {COLUMNS.map(({ key }) => (
                   <td
                     key={key}
@@ -1005,6 +1328,47 @@ export function AdminUsersClient({ users }: { users: SafeUser[] }) {
         >
           ¿Marcar como entregado el bono de{" "}
           <strong className="text-foreground">{pendingConfirm.user.name}</strong>?
+        </AdminConfirmDialog>
+      ) : pendingConfirm?.kind === "bulkDeliver" ? (
+        <AdminConfirmDialog
+          title="Entrega masiva"
+          confirmLabel="Marcar entregado"
+          onCancel={() => setPendingConfirm(null)}
+          onConfirm={() => {
+            const users = pendingConfirm.users;
+            setPendingConfirm(null);
+            window.setTimeout(() => {
+              void runBulkDeliver(users);
+            }, 0);
+          }}
+        >
+          Se marcará como entregado el bono de{" "}
+          <strong className="text-foreground">
+            {pendingConfirm.users.length}
+          </strong>{" "}
+          socio(s) seleccionado(s) que estén{" "}
+          <strong className="text-foreground">activos</strong> y con{" "}
+          <strong className="text-foreground">entrega pendiente</strong>.
+        </AdminConfirmDialog>
+      ) : pendingConfirm?.kind === "bulkActivate" ? (
+        <AdminConfirmDialog
+          title="Activación / renovación masiva"
+          confirmLabel="Confirmar"
+          onCancel={() => setPendingConfirm(null)}
+          onConfirm={() => {
+            const users = pendingConfirm.users;
+            setPendingConfirm(null);
+            window.setTimeout(() => {
+              void runBulkActivate(users);
+            }, 0);
+          }}
+        >
+          Se aplicará activación o renovación a{" "}
+          <strong className="text-foreground">
+            {pendingConfirm.users.length}
+          </strong>{" "}
+          socio(s) según corresponda (alta pendiente de pago, inactivo o renovación
+          anual).
         </AdminConfirmDialog>
       ) : null}
 

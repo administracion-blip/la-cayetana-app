@@ -673,6 +673,40 @@ export async function getUserById(id: string): Promise<UserRecord | null> {
   return item as UserRecord;
 }
 
+/**
+ * Busca un socio por `membershipId` (ej. `CY0234`). Usa `Scan` filtrado porque
+ * el membershipId se asigna una vez y no hay un GSI dedicado. Volumen esperado
+ * bajo (unos miles de socios) y llamada puntual (canje de premios de ruleta).
+ */
+export async function getUserByMembershipId(
+  membershipId: string,
+): Promise<UserRecord | null> {
+  if (!membershipId) return null;
+  const doc = getDocClient();
+  const { USERS_TABLE_NAME } = getEnv();
+  let startKey: Record<string, unknown> | undefined;
+  do {
+    const res = await doc.send(
+      new ScanCommand({
+        TableName: USERS_TABLE_NAME,
+        FilterExpression: "entityType = :u AND membershipId = :m",
+        ExpressionAttributeValues: {
+          ":u": USER_ENTITY_TYPE,
+          ":m": membershipId,
+        },
+        ExclusiveStartKey: startKey,
+      }),
+    );
+    for (const item of res.Items ?? []) {
+      if (item.entityType === USER_ENTITY_TYPE) {
+        return item as UserRecord;
+      }
+    }
+    startKey = res.LastEvaluatedKey;
+  } while (startKey);
+  return null;
+}
+
 export async function getUserByEmail(
   email: string,
 ): Promise<UserRecord | null> {
@@ -773,6 +807,11 @@ export type AdminUserPatch = {
   status?: UserStatus;
   exportedToAgora?: boolean;
   isAdmin?: boolean;
+  /**
+   * Ruleta de la Suerte: autoriza al socio a validar canjes mostrando su
+   * carnet en taquilla. `false` elimina el atributo.
+   */
+  canValidatePrizes?: boolean;
 };
 
 /** Actualiza campos editables desde el panel admin / import Excel (por `id` de usuario). */
@@ -816,6 +855,15 @@ export async function updateUserFieldsById(
     names["#adm"] = "isAdmin";
     values[":adm"] = patch.isAdmin;
     setParts.push("#adm = :adm");
+  }
+  if (patch.canValidatePrizes !== undefined) {
+    if (patch.canValidatePrizes === true) {
+      names["#cvp"] = "canValidatePrizes";
+      values[":cvp"] = true;
+      setParts.push("#cvp = :cvp");
+    } else {
+      removeAttrs.push("canValidatePrizes");
+    }
   }
 
   if (setParts.length === 0 && removeAttrs.length === 0) return;

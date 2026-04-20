@@ -8,6 +8,13 @@ const schema = z.object({
   PROGRAMACION_TABLE_NAME: z.string().min(1),
   /** Bucket S3 donde se guardan las imágenes de los eventos. */
   PROGRAMACION_S3_BUCKET: z.string().min(1),
+  /**
+   * Tabla DynamoDB single-table de la Ruleta de la Suerte.
+   * PK/SK: `PK` + `SK` (String). GSIs:
+   *  - `by-user-prize` (GSI1PK + GSI1SK)
+   *  - `by-prize-status` (GSI2PK + GSI2SK)
+   */
+  ROULETTE_TABLE_NAME: z.string().min(1),
   STRIPE_SECRET_KEY: z.string().min(1),
   /**
    * Secreto del webhook de Stripe. OPCIONAL en el flujo manual actual:

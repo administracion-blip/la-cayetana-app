@@ -19,7 +19,7 @@ export default function RegistroPage() {
           >
             El plazo para <strong>nuevas altas</strong> en línea ha finalizado.
             Si <strong>ya eres socio</strong> y debes renovar, introduce el mismo
-            email que usas en el club y completa el pago; si no, escríbenos a
+            email que usas en la aplicación y completa el pago; si no, escríbenos a
             lacayetanagranada@gmail.com
           </p>
         ) : null}
