@@ -186,7 +186,7 @@ export function PinToHomeScreenModal({ open, onClose }: Props) {
         <div
           role="status"
           aria-live="polite"
-          className="fixed bottom-6 left-1/2 z-[70] max-w-[min(90vw,20rem)] -translate-x-1/2 rounded-full border border-border bg-foreground px-4 py-2.5 text-center text-sm text-white shadow-lg"
+          className="fixed bottom-6 left-1/2 z-[130] max-w-[min(90vw,20rem)] -translate-x-1/2 rounded-full border border-border bg-foreground px-4 py-2.5 text-center text-sm text-white shadow-lg"
         >
           {toast}
         </div>
@@ -194,7 +194,7 @@ export function PinToHomeScreenModal({ open, onClose }: Props) {
 
       {open ? (
         <div
-          className="fixed inset-0 z-[60] flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4"
+          className="fixed inset-0 z-[120] flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4"
           role="dialog"
           aria-modal="true"
           aria-labelledby={titleId}

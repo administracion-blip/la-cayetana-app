@@ -21,7 +21,7 @@ export default async function PrivateLayout({
 
   return (
     <div className="flex min-h-full flex-col">
-      <header className="sticky top-0 z-10 border-b border-border bg-white">
+      <header className="sticky top-0 z-[100] border-b border-border bg-white">
         <div className="mx-auto flex max-w-lg items-center gap-2 px-4 py-3 sm:gap-3">
           <AppHeaderMenu isAdmin={user.isAdmin === true} />
           <Link

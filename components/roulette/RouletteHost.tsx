@@ -286,7 +286,7 @@ function Modal({
   if (!open) return null;
   return (
     <div
-      className="fixed inset-0 z-40 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4"
+      className="fixed inset-0 z-[120] flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4"
       role="dialog"
       aria-modal="true"
       aria-labelledby={labelledBy}
@@ -1175,7 +1175,7 @@ export function RouletteHost() {
       {/* Error de canje: modal encima del scanner cerrado (reintentar) */}
       {view === "redeem-scan" && redeemError ? (
         <div
-          className="fixed inset-x-0 bottom-4 z-[60] mx-auto w-[92%] max-w-sm rounded-2xl bg-red-600 px-4 py-3 text-sm text-white shadow-lg"
+          className="fixed inset-x-0 bottom-4 z-[130] mx-auto w-[92%] max-w-sm rounded-2xl bg-red-600 px-4 py-3 text-sm text-white shadow-lg"
           role="alert"
         >
           {redeemError}

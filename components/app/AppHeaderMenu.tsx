@@ -62,7 +62,7 @@ export function AppHeaderMenu({ isAdmin }: Props) {
       {open ? (
         <>
           <div
-            className="fixed inset-0 z-[45] bg-black/20"
+            className="fixed inset-0 z-[100] bg-black/20"
             aria-hidden
             onClick={close}
           />
@@ -70,7 +70,7 @@ export function AppHeaderMenu({ isAdmin }: Props) {
             ref={panelRef}
             id={panelId}
             role="menu"
-            className="absolute left-0 top-[calc(100%+0.25rem)] z-50 min-w-[12rem] rounded-xl border border-border bg-card py-1 shadow-lg"
+            className="absolute left-0 top-[calc(100%+0.25rem)] z-[110] min-w-[12rem] rounded-xl border border-border bg-card py-1 shadow-lg"
           >
             <Link
               href="/app"

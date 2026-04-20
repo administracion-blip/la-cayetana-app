@@ -116,7 +116,7 @@ export function ProgramacionPopupHost() {
 
   return (
     <div
-      className="fixed inset-0 z-[60] flex items-end justify-center bg-black/50 px-3 pb-4 pt-10 sm:items-center sm:pb-10"
+      className="fixed inset-0 z-[120] flex items-end justify-center bg-black/50 px-3 pb-4 pt-10 sm:items-center sm:pb-10"
       role="dialog"
       aria-modal="true"
       aria-labelledby={titleId}
