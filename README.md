@@ -16,6 +16,10 @@ bun dev
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
+## Correo (recuperación de contraseña, SES)
+
+Para que el envío funcione en producción: variable `SES_FROM_EMAIL` en **Amplify** (p. ej. `noreply@lacayetana.net`), dominio verificado en **SES** en la misma región, y redeploy. Si la cuenta SES está en **sandbox**, solicita acceso a **producción** o solo podrás enviar a direcciones verificadas en SES. Detalle en `env.example`.
+
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
