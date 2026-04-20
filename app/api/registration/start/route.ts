@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { hashPassword } from "@/lib/auth/password";
+import { isCarnetPurchaseClosed } from "@/lib/carnet-purchase-deadline";
 import { getEnv } from "@/lib/env";
 import {
   canRenewThisYear,
@@ -87,6 +88,16 @@ export async function POST(request: Request) {
         renewal: true,
         membershipId: existing.membershipId ?? null,
       });
+    }
+
+    if (isCarnetPurchaseClosed()) {
+      return NextResponse.json(
+        {
+          error:
+            "El plazo para conseguir el carnet en línea ha finalizado. Si necesitas ayuda, contacta con el club.",
+        },
+        { status: 403 },
+      );
     }
 
     const passwordHash = await hashPassword(password);

@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { LiveBorderCard } from "@/components/app/LiveBorderCard";
 import { LiveClock } from "@/components/app/LiveClock";
 import { MembershipQr } from "@/components/qr/MembershipQr";
 import { getSessionFromCookies } from "@/lib/auth/session";
@@ -13,7 +14,7 @@ export default async function CardPage() {
 
   return (
     <div className="flex flex-col items-center">
-      <div className="w-full max-w-sm rounded-2xl border border-border bg-card p-5 shadow-sm">
+      <LiveBorderCard>
         <p className="mb-3 text-center text-xs font-medium uppercase tracking-wide text-muted">
           Carnet digital
         </p>
@@ -38,7 +39,7 @@ export default async function CardPage() {
         <div className="mt-4 flex justify-center border-t border-border pt-4">
           <MembershipQr value={user.membershipId} />
         </div>
-      </div>
+      </LiveBorderCard>
     </div>
   );
 }

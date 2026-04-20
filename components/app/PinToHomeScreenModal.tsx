@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useId, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useState } from "react";
 
 type Props = {
   open: boolean;
@@ -11,19 +11,95 @@ const SHARE_TITLE = "La Cayetana Granada";
 const SHARE_TEXT = "Acceso a La Cayetana";
 
 /**
- * Panel flotante con pasos para añadir la web a la pantalla de inicio (iOS / Android).
- * Tras «Entendido» intenta la hoja de compartir nativa (Web Share API); si no hay o falla,
- * copia la URL al portapapeles.
+ * Información sobre el navegador/plataforma del usuario que usamos para
+ * decidir qué instrucciones y qué acción principal mostrar en el modal.
+ * No se pretende detectar cada combinación posible, solo las que impactan
+ * en cómo se añade la web a la pantalla de inicio.
+ */
+type PinFlow = {
+  isIOS: boolean;
+  isAndroid: boolean;
+  isSafari: boolean;
+  isStandalone: boolean;
+  canShare: boolean;
+  /**
+   * Reservado para un futuro flujo con `beforeinstallprompt` en Android.
+   * Se deja a `false` a propósito: cuando la app sea PWA instalable, aquí
+   * escucharemos el evento y habilitaremos `Instalar app`.
+   */
+  canInstallPrompt: boolean;
+};
+
+const EMPTY_FLOW: PinFlow = {
+  isIOS: false,
+  isAndroid: false,
+  isSafari: false,
+  isStandalone: false,
+  canShare: false,
+  canInstallPrompt: false,
+};
+
+function detectPinFlow(): PinFlow {
+  if (typeof window === "undefined" || typeof navigator === "undefined") {
+    return EMPTY_FLOW;
+  }
+
+  const ua = navigator.userAgent || "";
+
+  const isAndroid = /Android/i.test(ua);
+  const isIOS =
+    /iPhone|iPad|iPod/i.test(ua) ||
+    // iPadOS 13+ se identifica como "MacIntel" con soporte táctil.
+    (navigator.platform === "MacIntel" &&
+      typeof navigator.maxTouchPoints === "number" &&
+      navigator.maxTouchPoints > 1);
+
+  // Safari real (no Chrome iOS, Edge iOS, Firefox iOS, Samsung Internet, etc.)
+  const isSafari =
+    /Safari/i.test(ua) &&
+    !/Chrome|CriOS|EdgiOS|FxiOS|OPiOS|SamsungBrowser|Android/i.test(ua);
+
+  const matchStandalone =
+    typeof window.matchMedia === "function"
+      ? window.matchMedia("(display-mode: standalone)").matches
+      : false;
+  const iosStandalone =
+    (navigator as Navigator & { standalone?: boolean }).standalone === true;
+  const isStandalone = matchStandalone || iosStandalone;
+
+  const canShare = typeof navigator.share === "function";
+
+  return {
+    isIOS,
+    isAndroid,
+    isSafari,
+    isStandalone,
+    canShare,
+    canInstallPrompt: false,
+  };
+}
+
+/**
+ * Panel flotante con pasos para añadir la web a la pantalla de inicio.
+ * La UX y la acción principal se adaptan a la plataforma detectada para
+ * reducir la operativa del usuario al mínimo:
+ *  - iOS + Safari -> botón «Abrir compartir» que lanza `navigator.share()`.
+ *  - iOS + otro navegador (Chrome iOS, Edge iOS…) -> aviso de usar Safari.
+ *  - Android -> instrucciones del menú del navegador + «Entendido».
+ *  - Ya instalada (standalone) -> solo confirmación, sin flujo de instalación.
  */
 export function PinToHomeScreenModal({ open, onClose }: Props) {
   const titleId = useId();
   const [toast, setToast] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [flow, setFlow] = useState<PinFlow>(EMPTY_FLOW);
 
   const handleClose = useCallback(() => onClose(), [onClose]);
 
   useEffect(() => {
-    if (open) setToast(null);
+    if (!open) return;
+    setFlow(detectPinFlow());
+    setToast(null);
   }, [open]);
 
   useEffect(() => {
@@ -35,8 +111,30 @@ export function PinToHomeScreenModal({ open, onClose }: Props) {
     return () => document.removeEventListener("keydown", onKey);
   }, [open, handleClose]);
 
-  const handleEntendido = async () => {
+  const scenario = useMemo<
+    "standalone" | "ios-safari" | "ios-other" | "android" | "generic"
+  >(() => {
+    if (flow.isStandalone) return "standalone";
+    if (flow.isIOS && flow.isSafari) return "ios-safari";
+    if (flow.isIOS) return "ios-other";
+    if (flow.isAndroid) return "android";
+    return "generic";
+  }, [flow]);
+
+  const primaryLabel =
+    scenario === "standalone"
+      ? "Cerrar"
+      : scenario === "ios-safari"
+        ? "Abrir compartir"
+        : "Entendido";
+
+  const handlePrimary = async () => {
     if (typeof window === "undefined") {
+      handleClose();
+      return;
+    }
+
+    if (scenario !== "ios-safari") {
       handleClose();
       return;
     }
@@ -50,9 +148,8 @@ export function PinToHomeScreenModal({ open, onClose }: Props) {
 
     setBusy(true);
     try {
-      if (typeof navigator !== "undefined" && navigator.share) {
-        const can =
-          !navigator.canShare || navigator.canShare(payload);
+      if (flow.canShare) {
+        const can = !navigator.canShare || navigator.canShare(payload);
         if (can) {
           try {
             await navigator.share(payload);
@@ -63,7 +160,7 @@ export function PinToHomeScreenModal({ open, onClose }: Props) {
               handleClose();
               return;
             }
-            // Otro error: seguir con portapapeles
+            // cualquier otro error: pasamos al fallback
           }
         }
       }
@@ -113,32 +210,42 @@ export function PinToHomeScreenModal({ open, onClose }: Props) {
                   id={titleId}
                   className="pr-10 text-base font-semibold text-foreground sm:text-lg"
                 >
-                  Añadir al inicio del móvil
+                  {scenario === "standalone"
+                    ? "Ya la tienes en tu pantalla de inicio"
+                    : "Añadir al inicio del móvil"}
                 </h2>
                 <p className="mt-1 text-xs text-muted sm:text-sm">
-                  Así abres La Cayetana como un acceso directo, sin buscar la
-                  pestaña en el navegador.
+                  {scenario === "standalone"
+                    ? "Estás usando La Cayetana como app instalada en este dispositivo."
+                    : "Abre La Cayetana como un acceso directo, sin buscar la pestaña en el navegador."}
                 </p>
               </div>
+
               <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-5">
-                <div className="grid gap-4 sm:grid-cols-2 sm:gap-5">
+                {scenario === "standalone" ? (
+                  <div className="rounded-xl border border-border bg-background/80 p-3 text-sm leading-relaxed text-muted sm:p-4">
+                    La app ya está añadida a la pantalla de inicio en este
+                    dispositivo. Puedes abrirla desde su icono sin pasar por el
+                    navegador.
+                  </div>
+                ) : scenario === "ios-safari" ? (
                   <section
                     className="rounded-xl border border-border bg-background/80 p-3 sm:p-4"
-                    aria-label="Instrucciones para iPhone e iPad"
+                    aria-label="Instrucciones para iPhone e iPad con Safari"
                   >
                     <h3 className="mb-2 text-sm font-semibold text-foreground">
                       iPhone / iPad (Safari)
                     </h3>
                     <ol className="list-decimal space-y-2 pl-4 text-xs leading-relaxed text-muted sm:text-sm">
                       <li>
-                        Pulsa el botón{" "}
+                        Pulsa{" "}
                         <span className="font-medium text-foreground">
-                          Compartir
+                          Abrir compartir
                         </span>{" "}
-                        (cuadrado con flecha hacia arriba) en la barra inferior.
+                        en el botón inferior.
                       </li>
                       <li>
-                        Desplázate y elige{" "}
+                        En la hoja de compartir, desplázate y elige{" "}
                         <span className="font-medium text-foreground">
                           Añadir a pantalla de inicio
                         </span>
@@ -153,12 +260,53 @@ export function PinToHomeScreenModal({ open, onClose }: Props) {
                       </li>
                     </ol>
                   </section>
+                ) : scenario === "ios-other" ? (
+                  <section
+                    className="rounded-xl border border-border bg-background/80 p-3 sm:p-4"
+                    aria-label="Instrucciones para iPhone e iPad sin Safari"
+                  >
+                    <h3 className="mb-2 text-sm font-semibold text-foreground">
+                      iPhone / iPad
+                    </h3>
+                    <p className="text-xs leading-relaxed text-muted sm:text-sm">
+                      En iPhone y iPad, solo Safari permite añadir una web a la
+                      pantalla de inicio. Abre esta misma dirección en{" "}
+                      <span className="font-medium text-foreground">
+                        Safari
+                      </span>{" "}
+                      y sigue estos pasos:
+                    </p>
+                    <ol className="mt-2 list-decimal space-y-2 pl-4 text-xs leading-relaxed text-muted sm:text-sm">
+                      <li>
+                        Pulsa el botón{" "}
+                        <span className="font-medium text-foreground">
+                          Compartir
+                        </span>{" "}
+                        (cuadrado con flecha hacia arriba).
+                      </li>
+                      <li>
+                        Elige{" "}
+                        <span className="font-medium text-foreground">
+                          Añadir a pantalla de inicio
+                        </span>
+                        .
+                      </li>
+                      <li>
+                        Revisa el nombre y pulsa{" "}
+                        <span className="font-medium text-foreground">
+                          Añadir
+                        </span>
+                        .
+                      </li>
+                    </ol>
+                  </section>
+                ) : scenario === "android" ? (
                   <section
                     className="rounded-xl border border-border bg-background/80 p-3 sm:p-4"
                     aria-label="Instrucciones para Android"
                   >
                     <h3 className="mb-2 text-sm font-semibold text-foreground">
-                      Android (Chrome)
+                      Android (Chrome y similares)
                     </h3>
                     <ol className="list-decimal space-y-2 pl-4 text-xs leading-relaxed text-muted sm:text-sm">
                       <li>
@@ -169,31 +317,88 @@ export function PinToHomeScreenModal({ open, onClose }: Props) {
                       <li>
                         Elige{" "}
                         <span className="font-medium text-foreground">
-                          Instalar aplicación
+                          Añadir a pantalla de inicio
                         </span>{" "}
                         o{" "}
                         <span className="font-medium text-foreground">
-                          Añadir a pantalla de inicio
+                          Instalar aplicación
                         </span>
                         .
                       </li>
                       <li>Confirma en el cuadro que aparezca.</li>
                     </ol>
                     <p className="mt-2 text-[11px] leading-snug text-muted">
-                      En otros navegadores el menú puede variar; busca una opción
-                      similar en Compartir o en el menú del navegador.
+                      El texto exacto puede variar según el navegador. En otros
+                      como Samsung Internet o Firefox, busca una opción similar
+                      dentro de su menú.
                     </p>
                   </section>
-                </div>
+                ) : (
+                  <div className="grid gap-4 sm:grid-cols-2 sm:gap-5">
+                    <section
+                      className="rounded-xl border border-border bg-background/80 p-3 sm:p-4"
+                      aria-label="Instrucciones para iPhone e iPad"
+                    >
+                      <h3 className="mb-2 text-sm font-semibold text-foreground">
+                        iPhone / iPad (Safari)
+                      </h3>
+                      <ol className="list-decimal space-y-2 pl-4 text-xs leading-relaxed text-muted sm:text-sm">
+                        <li>
+                          Pulsa el botón{" "}
+                          <span className="font-medium text-foreground">
+                            Compartir
+                          </span>{" "}
+                          (cuadrado con flecha hacia arriba).
+                        </li>
+                        <li>
+                          Elige{" "}
+                          <span className="font-medium text-foreground">
+                            Añadir a pantalla de inicio
+                          </span>
+                          .
+                        </li>
+                      </ol>
+                    </section>
+                    <section
+                      className="rounded-xl border border-border bg-background/80 p-3 sm:p-4"
+                      aria-label="Instrucciones para Android"
+                    >
+                      <h3 className="mb-2 text-sm font-semibold text-foreground">
+                        Android (Chrome)
+                      </h3>
+                      <ol className="list-decimal space-y-2 pl-4 text-xs leading-relaxed text-muted sm:text-sm">
+                        <li>
+                          Pulsa el menú{" "}
+                          <span className="font-medium text-foreground">
+                            ⋮
+                          </span>{" "}
+                          (tres puntos) arriba a la derecha.
+                        </li>
+                        <li>
+                          Elige{" "}
+                          <span className="font-medium text-foreground">
+                            Añadir a pantalla de inicio
+                          </span>{" "}
+                          o{" "}
+                          <span className="font-medium text-foreground">
+                            Instalar aplicación
+                          </span>
+                          .
+                        </li>
+                      </ol>
+                    </section>
+                  </div>
+                )}
               </div>
+
               <div className="shrink-0 border-t border-border px-4 py-3 sm:px-5">
                 <button
                   type="button"
                   disabled={busy}
-                  onClick={() => void handleEntendido()}
+                  onClick={() => void handlePrimary()}
                   className="w-full rounded-xl bg-brand py-3 text-sm font-medium text-white hover:bg-brand-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:opacity-60"
                 >
-                  {busy ? "Abriendo…" : "Entendido"}
+                  {busy ? "Abriendo…" : primaryLabel}
                 </button>
               </div>
             </div>

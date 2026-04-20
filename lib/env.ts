@@ -38,6 +38,25 @@ const schema = z.object({
     .union([z.string().email(), z.literal("")])
     .optional()
     .transform((v) => (v === "" ? undefined : v)),
+  /**
+   * Fecha y hora límite (ISO 8601, p. ej. `2026-05-31T23:59:59.000Z`) tras la cual
+   * no se permite iniciar nuevas altas / compra del carnet desde la web. Vacía o
+   * ausente = sin límite (comportamiento anterior).
+   */
+  FECHA_LIMITE_COMPRA_CARNET: z
+    .union([z.string(), z.undefined()])
+    .transform((v) =>
+      v === undefined || typeof v !== "string" || v.trim() === ""
+        ? undefined
+        : v.trim(),
+    )
+    .refine(
+      (v) => v === undefined || !Number.isNaN(Date.parse(v)),
+      {
+        message:
+          "FECHA_LIMITE_COMPRA_CARNET debe ser una fecha/hora ISO 8601 válida",
+      },
+    ),
 });
 
 export type Env = z.infer<typeof schema>;

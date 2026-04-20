@@ -33,3 +33,119 @@ body {
   color: var(--foreground);
   font-family: var(--font-geist-sans), system-ui, sans-serif;
 }
+
+/*
+ * Borde animado del carnet digital.
+ * Un haz rojo recorre el perímetro con un conic-gradient cuyo ángulo se
+ * anima mediante @property. Sirve como señal "vivo" que una captura de
+ * pantalla o una foto del carnet no puede reproducir (queda congelada).
+ *
+ * Técnica: pseudo-elemento ::before a tamaño completo del card, con el
+ * gradiente de fondo y un mask que recorta todo el interior dejando solo
+ * un anillo de `--lc-border-width` de grosor. Funciona en Chrome, Safari
+ * y Firefox actuales. Si el navegador no soporta @property, el anillo se
+ * queda estático pero sigue siendo visible y en color de marca.
+ */
+@property --lc-border-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+
+.live-border-card {
+  --lc-border-angle: 0deg;
+  --lc-border-width: 2px;
+  position: relative;
+  border-radius: 1rem;
+  background-color: var(--card);
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.04),
+    0 4px 14px -6px color-mix(in srgb, var(--brand) 35%, transparent);
+}
+
+.live-border-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: var(--lc-border-width);
+  background: conic-gradient(
+    from var(--lc-border-angle),
+    var(--brand) 0deg,
+    color-mix(in srgb, var(--brand) 35%, transparent) 40deg,
+    transparent 90deg,
+    transparent 270deg,
+    color-mix(in srgb, var(--brand) 35%, transparent) 320deg,
+    var(--brand) 360deg
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  pointer-events: none;
+  animation: lc-border-spin 3.2s linear infinite;
+}
+
+@keyframes lc-border-spin {
+  to {
+    --lc-border-angle: 360deg;
+  }
+}
+
+/*
+ * Indicador "LIVE" en la esquina del carnet: un pequeño punto rojo que
+ * parpadea y refuerza la señal de que el carnet está en vivo.
+ */
+.live-border-dot {
+  position: absolute;
+  top: 0.6rem;
+  right: 0.75rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--brand);
+}
+
+.live-border-dot::before {
+  content: "";
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 9999px;
+  background: var(--brand);
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--brand) 60%, transparent);
+  animation: lc-dot-pulse 1.4s ease-out infinite;
+}
+
+@keyframes lc-dot-pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--brand) 60%, transparent);
+    opacity: 1;
+  }
+  70% {
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--brand) 0%, transparent);
+    opacity: 0.85;
+  }
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--brand) 0%, transparent);
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .live-border-card::before {
+    animation: none;
+    /* Fallback estático: anillo rojo sólido visible sin movimiento. */
+    background: var(--brand);
+  }
+  .live-border-dot::before {
+    animation: none;
+  }
+}
