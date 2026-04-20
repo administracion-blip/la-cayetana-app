@@ -39,27 +39,114 @@ type SpinResultDto = {
 /* ------------------------------------------------------------------ */
 
 type WheelSlot =
-  | { kind: "prize"; prizeType: PrizeType; label: string; color: string }
-  | { kind: "lose"; label: string; color: string };
+  | {
+      kind: "prize";
+      prizeType: PrizeType;
+      label: string;
+      fill: string;
+      stroke: string;
+      textFill: string;
+    }
+  | {
+      kind: "lose";
+      label: string;
+      fill: string;
+      stroke: string;
+      textFill: string;
+    };
 
 /**
- * 8 sectores en sentido horario empezando por arriba. El orden se mezcla
- * para que al perder se pueda caer en uno de los 3 sectores "lose" y
- * quede natural. Los colores son pasteles del esquema amber/rosa del club.
+ * 8 sectores en sentido horario empezando por arriba. Colores planos;
+ * Cuñas sin premio: gris oscuro, texto «Sin premio» en blanco; Botella en verde.
  */
 const WHEEL_SLOTS: WheelSlot[] = [
-  { kind: "prize", prizeType: "copa", label: "Copa", color: "#fda4af" },
-  { kind: "lose", label: "Sigue", color: "#ffe4e6" },
-  { kind: "prize", prizeType: "tercio", label: "Tercio", color: "#fca5a5" },
-  { kind: "lose", label: "Suerte", color: "#fee2e2" },
-  { kind: "prize", prizeType: "chupito", label: "Chupitos", color: "#fecaca" },
-  { kind: "prize", prizeType: "rebujito", label: "Rebujito", color: "#fb7185" },
-  { kind: "lose", label: "Vuelve", color: "#fff1f2" },
-  { kind: "prize", prizeType: "botella", label: "Botella", color: "#f87171" },
+  {
+    kind: "prize",
+    prizeType: "copa",
+    label: "Copa",
+    fill: "#e11d48",
+    stroke: "#881337",
+    textFill: "#fff1f2",
+  },
+  {
+    kind: "lose",
+    label: "Sin premio",
+    fill: "#27272a",
+    stroke: "#3f3f46",
+    textFill: "#ffffff",
+  },
+  {
+    kind: "prize",
+    prizeType: "tercio",
+    label: "Tercio",
+    fill: "#e11d48",
+    stroke: "#881337",
+    textFill: "#fff1f2",
+  },
+  {
+    kind: "lose",
+    label: "Sin premio",
+    fill: "#27272a",
+    stroke: "#3f3f46",
+    textFill: "#ffffff",
+  },
+  {
+    kind: "prize",
+    prizeType: "chupito",
+    label: "Chupitos",
+    fill: "#e11d48",
+    stroke: "#881337",
+    textFill: "#fff1f2",
+  },
+  {
+    kind: "prize",
+    prizeType: "rebujito",
+    label: "J. Rebujito",
+    fill: "#e11d48",
+    stroke: "#881337",
+    textFill: "#fff1f2",
+  },
+  {
+    kind: "lose",
+    label: "Sin premio",
+    fill: "#27272a",
+    stroke: "#3f3f46",
+    textFill: "#ffffff",
+  },
+  {
+    kind: "prize",
+    prizeType: "botella",
+    label: "Botella",
+    fill: "#15803d",
+    stroke: "#14532d",
+    textFill: "#ecfdf5",
+  },
 ];
 
 const SLOT_COUNT = WHEEL_SLOTS.length;
 const SLOT_DEG = 360 / SLOT_COUNT;
+
+/** Amarillo pastel: puntero superior y botón Girar. */
+const SELECTOR_PASTEL_BG = "#fef3c7";
+
+function wedgeChord(radius: number): number {
+  return 2 * radius * Math.sin((SLOT_DEG / 2) * (Math.PI / 180));
+}
+
+/**
+ * Un solo tamaño para todas las cuñas (una línea): que encaje la etiqueta más larga.
+ */
+const WHEEL_UNIFORM_FONT_SIZE = (() => {
+  const charW = 0.4;
+  const labelR = 64;
+  const chord = wedgeChord(labelR) * 0.96;
+  let minF = 20;
+  for (const slot of WHEEL_SLOTS) {
+    const len = Math.max(slot.label.length, 1);
+    minF = Math.min(minF, chord / (len * charW));
+  }
+  return Math.max(5.75, Math.min(10.75, minF));
+})();
 
 /** Icono simple de ruleta (no hay dependencia externa). */
 function RouletteIcon({ className = "" }: { className?: string }) {
@@ -106,50 +193,67 @@ function RouletteButton({
 }) {
   const disabled = !status || status.disabled;
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      className={`group flex w-full items-center gap-3 rounded-2xl border px-4 py-3 text-left shadow-sm transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-500 ${
-        disabled
-          ? "cursor-not-allowed border-zinc-200 bg-zinc-100 text-zinc-500"
-          : "border-amber-200 bg-amber-100 text-amber-900 hover:bg-amber-200/80 active:scale-[0.99]"
+    <div
+      className={`relative w-full overflow-hidden rounded-2xl ${
+        disabled ? "" : "shadow-[0_0_28px_rgba(250,204,21,0.4)]"
       }`}
-      aria-label="Juega a la Ruleta"
     >
-      <span
-        className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full ${
-          disabled ? "bg-zinc-200" : "bg-amber-300"
-        }`}
-      >
-        <RouletteIcon
-          className={`h-6 w-6 ${
-            disabled ? "text-zinc-500" : "text-amber-900"
-          } ${!disabled ? "transition-transform group-hover:rotate-45" : ""}`}
+      {/* Gradiente cónico a pantalla completa; el botón deja ~3px de hueco (margen) donde se ve el “láser” */}
+      {!disabled && (
+        <div
+          className="pointer-events-none absolute inset-0 z-0 animate-[spin_2.5s_linear_infinite] bg-[conic-gradient(from_0deg,transparent_0deg,transparent_240deg,rgba(253,224,71,0.85)_275deg,rgba(250,204,21,1)_295deg,rgba(254,249,195,1)_310deg,rgba(250,204,21,0.75)_325deg,transparent_350deg)] motion-reduce:animate-none"
+          aria-hidden
         />
-      </span>
-      <span className="flex flex-1 flex-col">
-        <span className="text-[15px] font-semibold leading-tight">
-          {status?.activePrize
-            ? "Ruleta de la Suerte"
-            : "Juega a la Ruleta"}
-        </span>
-        <span className="text-xs leading-tight opacity-80">
-          {status?.activePrize
-            ? "¡Tienes un premio sin canjear! Pulsa para canjearlo."
-            : disabled
-              ? "Has gastado tus tiradas. Vuelve tras la próxima apertura."
-              : "Prueba suerte y gana premios en La Cayetana."}
-        </span>
-      </span>
-      <span
-        className={`shrink-0 rounded-full px-3 py-1 text-sm ${
-          disabled ? "bg-zinc-200" : "bg-white/60"
+      )}
+      <button
+        type="button"
+        onClick={onClick}
+        disabled={disabled}
+        className={`group relative z-10 box-border flex items-center gap-3 border px-4 py-3 text-left shadow-sm transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-500 ${
+          disabled
+            ? "w-full cursor-not-allowed rounded-2xl border-zinc-200 bg-zinc-100 text-zinc-500"
+            : "m-[4px] w-[calc(100%-8px)] max-w-[calc(100%-8px)] rounded-[calc(1rem-4px)] border-amber-200/80 bg-amber-100 text-amber-900 hover:bg-amber-200/90 active:scale-[0.99]"
         }`}
+        aria-label="Juega a la Ruleta"
       >
-        <CounterLabel status={status} />
-      </span>
-    </button>
+        <span
+          className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full ${
+            disabled ? "bg-zinc-200" : "bg-amber-300/90 shadow-inner"
+          }`}
+        >
+          <RouletteIcon
+            className={`h-6 w-6 ${
+              disabled ? "text-zinc-500" : "text-amber-900"
+            } ${
+              disabled
+                ? ""
+                : "animate-[spin_6s_linear_infinite] motion-reduce:animate-none"
+            }`}
+          />
+        </span>
+        <span className="flex flex-1 flex-col">
+          <span className="text-[15px] font-semibold leading-tight">
+            {status?.activePrize
+              ? "Ruleta de la Suerte"
+              : "Juega a la Ruleta"}
+          </span>
+          <span className="text-xs leading-tight opacity-80">
+            {status?.activePrize
+              ? "¡Tienes un premio sin canjear! Pulsa para canjearlo."
+              : disabled
+                ? "Has gastado tus tiradas. Vuelve tras la próxima apertura."
+                : "Prueba suerte y gana premios en La Cayetana."}
+          </span>
+        </span>
+        <span
+          className={`shrink-0 rounded-full px-3 py-1 text-sm ${
+            disabled ? "bg-zinc-200" : "bg-white/60"
+          }`}
+        >
+          <CounterLabel status={status} />
+        </span>
+      </button>
+    </div>
   );
 }
 
@@ -238,13 +342,27 @@ function slotPath(i: number): string {
   return `M100,100 L${sx.toFixed(3)},${sy.toFixed(3)} A${r},${r} 0 ${largeArc} 1 ${ex.toFixed(3)},${ey.toFixed(3)} Z`;
 }
 
+/**
+ * Gira el texto siguiendo el radio (de centro a borde), legible hacia afuera.
+ * Añade 180° en la mitad inferior para que no quede boca abajo.
+ */
+function radialLabelAngle(midDeg: number): number {
+  let a = midDeg;
+  while (a > 180) a -= 360;
+  while (a < -180) a += 360;
+  if (a > 90 || a < -90) a += 180;
+  return a;
+}
+
 /** Posición del texto en el centro del sector `i`. */
-function slotLabelPos(i: number): { x: number; y: number; angle: number } {
+function slotLabelPos(
+  i: number,
+  radius = 64,
+): { x: number; y: number; angle: number } {
   const mid = i * SLOT_DEG + SLOT_DEG / 2 - 90;
-  const r = 64;
-  const x = 100 + r * Math.cos((mid * Math.PI) / 180);
-  const y = 100 + r * Math.sin((mid * Math.PI) / 180);
-  return { x, y, angle: mid + 90 };
+  const x = 100 + radius * Math.cos((mid * Math.PI) / 180);
+  const y = 100 + radius * Math.sin((mid * Math.PI) / 180);
+  return { x, y, angle: radialLabelAngle(mid) };
 }
 
 type WheelPhase = "idle" | "spinning" | "landed";
@@ -287,15 +405,16 @@ function RouletteWheel({
 
   return (
     <div className="relative mx-auto aspect-square w-full max-w-[320px] select-none">
-      {/* Puntero fijo arriba */}
+      {/* Puntero / cuña selectora (mismo amarillo pastel que el botón Girar) */}
       <div className="absolute left-1/2 top-0 z-10 -translate-x-1/2 -translate-y-1">
         <div
           className="h-0 w-0"
           style={{
             borderLeft: "12px solid transparent",
             borderRight: "12px solid transparent",
-            borderTop: "18px solid #991b1b",
-            filter: "drop-shadow(0 2px 1px rgba(0,0,0,0.25))",
+            borderTop: `18px solid ${SELECTOR_PASTEL_BG}`,
+            filter:
+              "drop-shadow(0 1px 2px rgba(0,0,0,0.12)) drop-shadow(0 0 0 rgba(253,224,71,0.35))",
           }}
         />
       </div>
@@ -305,12 +424,37 @@ function RouletteWheel({
         aria-hidden="true"
       >
         <defs>
-          <radialGradient id="wheel-ring" cx="50%" cy="50%" r="50%">
-            <stop offset="85%" stopColor="#fca5a5" />
-            <stop offset="100%" stopColor="#b91c1c" />
+          {/* Mismo degradado dorado que el aro del eje central (circunferencia exterior). */}
+          <linearGradient id="hub-gold-ring" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor="#fde68a" />
+            <stop offset="40%" stopColor="#fbbf24" />
+            <stop offset="70%" stopColor="#b45309" />
+            <stop offset="100%" stopColor="#78350f" />
+          </linearGradient>
+          <radialGradient
+            id="hub-dome"
+            cx="35%"
+            cy="30%"
+            r="75%"
+            gradientUnits="objectBoundingBox"
+          >
+            <stop offset="0%" stopColor="#52525b" />
+            <stop offset="55%" stopColor="#27272a" />
+            <stop offset="100%" stopColor="#0c0a09" />
+          </radialGradient>
+          <radialGradient id="hub-rivet" cx="40%" cy="35%" r="60%">
+            <stop offset="0%" stopColor="#fef3c7" />
+            <stop offset="100%" stopColor="#ca8a04" />
           </radialGradient>
         </defs>
-        <circle cx="100" cy="100" r="100" fill="url(#wheel-ring)" />
+        <circle
+          cx="100"
+          cy="100"
+          r="100"
+          fill="url(#hub-gold-ring)"
+          stroke="#451a03"
+          strokeWidth={1.25}
+        />
         <g
           style={{
             transform: `rotate(${rotation}deg)`,
@@ -318,25 +462,31 @@ function RouletteWheel({
             transition,
           }}
         >
-          <circle cx="100" cy="100" r="96" fill="#fff1f2" />
+          <circle cx="100" cy="100" r="96" fill="#1c1917" />
           {WHEEL_SLOTS.map((slot, i) => {
-            const { x, y, angle } = slotLabelPos(i);
+            const { x, y, angle } = slotLabelPos(i, 64);
+            const isLose = slot.kind === "lose";
             return (
               <g key={i}>
                 <path
                   d={slotPath(i)}
-                  fill={slot.color}
-                  stroke="#b91c1c"
-                  strokeWidth={0.8}
+                  fill={slot.fill}
+                  stroke={slot.stroke}
+                  strokeWidth={isLose ? 0.9 : 0.75}
                 />
                 <text
                   x={x}
                   y={y}
                   textAnchor="middle"
                   dominantBaseline="middle"
-                  fontSize="10"
-                  fontWeight={700}
-                  fill="#7f1d1d"
+                  fontSize={WHEEL_UNIFORM_FONT_SIZE}
+                  fontWeight={800}
+                  fill={slot.textFill}
+                  style={{
+                    textShadow: isLose
+                      ? "0 0.5px 0 rgba(0,0,0,0.9)"
+                      : "0 1px 1px rgba(0,0,0,0.35)",
+                  }}
                   transform={`rotate(${angle} ${x} ${y})`}
                 >
                   {slot.label}
@@ -344,7 +494,6 @@ function RouletteWheel({
               </g>
             );
           })}
-          {/* separadores radiales suaves */}
           {WHEEL_SLOTS.map((_, i) => {
             const a = (i * SLOT_DEG - 90) * (Math.PI / 180);
             const x2 = 100 + 96 * Math.cos(a);
@@ -356,16 +505,41 @@ function RouletteWheel({
                 y1={100}
                 x2={x2}
                 y2={y2}
-                stroke="#ef4444"
-                strokeOpacity={0.35}
-                strokeWidth={0.6}
+                stroke="#000000"
+                strokeOpacity={1}
+                strokeWidth={0.95}
               />
             );
           })}
         </g>
-        {/* centro */}
-        <circle cx="100" cy="100" r="10" fill="#991b1b" />
-        <circle cx="100" cy="100" r="5" fill="#fecaca" />
+        {/* Eje fijo (no gira): aro metálico + cúpula + remache */}
+        <circle
+          cx="100"
+          cy="100"
+          r="18"
+          fill="url(#hub-gold-ring)"
+          stroke="#451a03"
+          strokeWidth={0.75}
+        />
+        <circle cx="100" cy="100" r="14.5" fill="url(#hub-dome)" />
+        <circle
+          cx="100"
+          cy="100"
+          r="14.5"
+          fill="none"
+          stroke="#52525b"
+          strokeWidth={0.4}
+          strokeOpacity={0.6}
+        />
+        <circle cx="100" cy="100" r="4.2" fill="url(#hub-rivet)" />
+        <circle
+          cx="100"
+          cy="100"
+          r="4.2"
+          fill="none"
+          stroke="#a16207"
+          strokeWidth={0.35}
+        />
       </svg>
     </div>
   );
@@ -828,7 +1002,7 @@ export function RouletteHost() {
             type="button"
             onClick={handleSpin}
             disabled={spinning || (status?.disabled ?? false)}
-            className="inline-flex w-full items-center justify-center rounded-full bg-amber-500 px-4 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-amber-600 disabled:opacity-60"
+            className="roulette-girar-btn inline-flex w-full items-center justify-center rounded-full border border-[#fde68a]/90 px-4 py-3 text-sm font-semibold text-zinc-900 shadow-sm transition-opacity disabled:opacity-60"
           >
             {spinning ? "Girando…" : "Girar"}
           </button>

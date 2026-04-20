@@ -69,7 +69,7 @@ export const PRIZE_LABEL: Record<PrizeType, string> = {
   copa: "1 Copa",
   tercio: "1 Tercio de cerveza",
   chupito: "2 Chupitos",
-  rebujito: "1 Jarra de rebujito",
+  rebujito: "1 J. Rebujito",
   botella: "1 Botella",
 };
 

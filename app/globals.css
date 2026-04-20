@@ -148,4 +148,46 @@ body {
   .live-border-dot::before {
     animation: none;
   }
+  .roulette-girar-btn {
+    animation: none !important;
+    background-color: #fef3c7;
+  }
+}
+
+/* Botón Girar: parpadeo suave entre tonos de amarillo pastel (claro → oscuro). */
+@keyframes roulette-girar-pastel {
+  0%,
+  100% {
+    background-color: #fffbeb;
+  }
+  20% {
+    background-color: #fef9c3;
+  }
+  40% {
+    background-color: #fef3c7;
+  }
+  55% {
+    background-color: #fde68a;
+  }
+  70% {
+    background-color: #fcd34d;
+  }
+  85% {
+    background-color: #fde68a;
+  }
+}
+
+.roulette-girar-btn {
+  background-color: #fffbeb;
+  animation: roulette-girar-pastel 3.5s ease-in-out infinite;
+}
+
+.roulette-girar-btn:hover:not(:disabled) {
+  animation-play-state: paused;
+  background-color: #fcd34d;
+}
+
+.roulette-girar-btn:disabled {
+  animation: none;
+  background-color: #fef3c7;
 }
