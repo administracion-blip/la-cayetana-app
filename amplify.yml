@@ -13,7 +13,7 @@ frontend:
         # con valores del build, sobrescribirían las credenciales del role.
         # Las NEXT_PUBLIC_* deben coincidir con el nombre completo (NEXT_PUBLIC_APP_URL,
         # NEXT_PUBLIC_STRIPE_*, etc.). Un patrón literal "NEXT_PUBLIC_=" no coincide nunca.
-        - env | grep -E '^(USERS_TABLE_NAME|POSTS_TABLE_NAME|PROGRAMACION_TABLE_NAME|PROGRAMACION_S3_BUCKET|STRIPE_SECRET_KEY|STRIPE_WEBHOOK_SECRET|SESSION_SECRET|SES_FROM_EMAIL|FECHA_LIMITE_COMPRA_CARNET)=' >> .env.production
+        - env | grep -E '^(USERS_TABLE_NAME|POSTS_TABLE_NAME|PROGRAMACION_TABLE_NAME|PROGRAMACION_S3_BUCKET|ROULETTE_TABLE_NAME|STRIPE_SECRET_KEY|STRIPE_WEBHOOK_SECRET|SESSION_SECRET|SES_FROM_EMAIL|FECHA_LIMITE_COMPRA_CARNET)=' >> .env.production
         - env | grep -E '^NEXT_PUBLIC_' >> .env.production
     build:
       commands:
