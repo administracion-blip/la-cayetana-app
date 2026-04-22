@@ -419,6 +419,20 @@ function stockFromPartial(
   return out;
 }
 
+/**
+ * Aplica claves añadidas en versiones recientes a un CONFIG ya guardado
+ * (despliegues anteriores no incluyen p. ej. `consolationEnabled`). Los
+ * valores del ítem en Dynamo **siempre ganan**; solo rellenamos lo que falte.
+ */
+function mergeRouletteConfigWithDefaults(
+  existing: RouletteConfigRecord,
+): RouletteConfigRecord {
+  return {
+    ...DEFAULT_ROULETTE_CONFIG,
+    ...existing,
+  } as RouletteConfigRecord;
+}
+
 /** Lee `CONFIG#CURRENT`. Si no existe, lo crea con los valores por defecto. */
 export async function getOrInitConfig(): Promise<RouletteConfigRecord> {
   const doc = getDocClient();
@@ -432,7 +446,7 @@ export async function getOrInitConfig(): Promise<RouletteConfigRecord> {
   );
   const existing = res.Item as RouletteConfigRecord | undefined;
   if (existing && existing.entityType === "ROULETTE_CONFIG") {
-    return existing;
+    return mergeRouletteConfigWithDefaults(existing);
   }
 
   const now = new Date().toISOString();
@@ -465,7 +479,18 @@ export async function getOrInitConfig(): Promise<RouletteConfigRecord> {
         Key: { PK: CONFIG_PK, SK: CONFIG_SK },
       }),
     );
-    return retry.Item as RouletteConfigRecord;
+    const item = retry.Item as RouletteConfigRecord | undefined;
+    if (item && item.entityType === "ROULETTE_CONFIG") {
+      return mergeRouletteConfigWithDefaults(item);
+    }
+    // Fallback defensivo: no debería ocurrir.
+    return {
+      PK: CONFIG_PK,
+      SK: CONFIG_SK,
+      entityType: "ROULETTE_CONFIG",
+      ...DEFAULT_ROULETTE_CONFIG,
+      updatedAt: new Date().toISOString(),
+    };
   }
 }
 
