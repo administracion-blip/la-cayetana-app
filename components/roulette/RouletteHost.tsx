@@ -2,6 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { QrScannerModal } from "@/components/admin/QrScannerModal";
+import {
+  ConsolationHost,
+  type ActiveConsolationDto,
+  type ConsolationView,
+} from "@/components/roulette/consolation/ConsolationHost";
 import type { PrizeType } from "@/types/models";
 
 /* ------------------------------------------------------------------ */
@@ -22,6 +27,13 @@ type RouletteStatusDto = {
     expiresAt: string;
     shadow: boolean;
   } | null;
+  activeConsolation: {
+    consolationId: string;
+    rewardType: string;
+    rewardLabel: string;
+    awardedAt: string;
+    expiresAt: string;
+  } | null;
 };
 
 type SpinResultDto = {
@@ -32,6 +44,12 @@ type SpinResultDto = {
   expiresAt: string | null;
   spinsRemaining: number | null;
   shadow: boolean;
+  consolation: {
+    consolationId: string;
+    rewardType: string;
+    rewardLabel: string;
+    expiresAt: string;
+  } | null;
 };
 
 /* ------------------------------------------------------------------ */
@@ -191,7 +209,10 @@ function RouletteButton({
   status: RouletteStatusDto | null;
   onClick: () => void;
 }) {
-  const disabled = !status || status.disabled;
+  const hasConsolation = !!status?.activeConsolation;
+  // Si hay un rasca pendiente tratamos el botón como activo (no deshabilitado),
+  // aunque `status.disabled` sea true por haber agotado tiradas.
+  const disabled = !status || (status.disabled && !hasConsolation);
   return (
     <div
       className={`relative w-full overflow-hidden rounded-2xl ${
@@ -235,14 +256,18 @@ function RouletteButton({
           <span className="text-[15px] font-semibold leading-tight">
             {status?.activePrize
               ? "Ruleta de la Suerte"
-              : "Juega a la Ruleta"}
+              : hasConsolation
+                ? "Regalo Seguro"
+                : "Juega a la Ruleta"}
           </span>
           <span className="text-xs leading-tight opacity-80">
             {status?.activePrize
               ? "¡Tienes un premio sin canjear! Pulsa para canjearlo."
-              : disabled
-                ? "Has gastado tus tiradas. Vuelve tras la próxima apertura."
-                : "Prueba suerte y gana premios en La Cayetana."}
+              : hasConsolation
+                ? "Tienes un regalo pendiente. Pulsa para recogerlo."
+                : disabled
+                  ? "Has gastado tus tiradas. Vuelve tras la próxima apertura."
+                  : "Prueba suerte y gana premios en La Cayetana."}
           </span>
         </span>
         <span
@@ -710,6 +735,8 @@ export function RouletteHost() {
   } | null>(null);
   const [discardBusy, setDiscardBusy] = useState(false);
   const [discardError, setDiscardError] = useState<string | null>(null);
+  const [consolationView, setConsolationView] =
+    useState<ConsolationView>("closed");
 
   const loadStatus = useCallback(async () => {
     try {
@@ -755,6 +782,13 @@ export function RouletteHost() {
       setView("prize");
       return;
     }
+    // Rasca activo pendiente de canjear: reabrimos el sobre. Si el usuario
+    // ya lo había cerrado antes, vuelve a verlo desde el principio del flujo
+    // (backend sigue siendo fuente de verdad del `expiresAt`).
+    if (status.activeConsolation) {
+      setConsolationView("envelope");
+      return;
+    }
     if (status.disabled) return;
     setView("welcome");
   }, [status]);
@@ -787,6 +821,7 @@ export function RouletteHost() {
         expiresAt: data.expiresAt,
         spinsRemaining: data.spinsRemaining,
         shadow: data.shadow,
+        consolation: data.consolation ?? null,
       };
       setLastSpin(result);
       const target = pickTargetSlotIndex(result);
@@ -798,6 +833,14 @@ export function RouletteHost() {
         setSpinning(false);
         if (result.outcome === "win") {
           void loadStatus().then(() => setView("prize"));
+        } else if (result.consolation) {
+          // Segunda derrota sin premio → salta directo al sobre. El backend
+          // ya creó el rasca en la misma transacción del spin, así que
+          // recargamos status y abrimos el envelope sin pasar por "lose".
+          void loadStatus().then(() => {
+            setView("closed");
+            setConsolationView("envelope");
+          });
         } else {
           void loadStatus();
           setView("lose");
@@ -885,10 +928,10 @@ export function RouletteHost() {
   }, [status, discardBusy, loadStatus]);
 
   // Aviso nativo del navegador al cerrar pestaña/refresh mientras haya
-  // premio activo. Evita cierres accidentales. No descarta el premio: al
-  // volver a la app, el socio podrá canjearlo mientras no caduque.
+  // premio o rasca activo. Evita cierres accidentales. No descarta nada:
+  // al volver a la app, el socio podrá canjearlo mientras no caduque.
   useEffect(() => {
-    if (!status?.activePrize) return;
+    if (!status?.activePrize && !status?.activeConsolation) return;
     function onBeforeUnload(e: BeforeUnloadEvent) {
       e.preventDefault();
       // Aunque Chrome/Safari ignoran el mensaje custom, otros navegadores
@@ -897,7 +940,7 @@ export function RouletteHost() {
     }
     window.addEventListener("beforeunload", onBeforeUnload);
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
-  }, [status?.activePrize]);
+  }, [status?.activePrize, status?.activeConsolation]);
 
   return (
     <>
@@ -1251,6 +1294,24 @@ export function RouletteHost() {
           </button>
         </div>
       </Modal>
+
+      {/* Flujo del "Regalo Seguro" (rasca de consolación). Reutiliza el
+          QrScannerModal y el endpoint /api/app/consolation/redeem. */}
+      <ConsolationHost
+        view={consolationView}
+        onViewChange={setConsolationView}
+        consolation={
+          status?.activeConsolation
+            ? ({
+                consolationId: status.activeConsolation.consolationId,
+                rewardLabel: status.activeConsolation.rewardLabel,
+                awardedAt: status.activeConsolation.awardedAt,
+                expiresAt: status.activeConsolation.expiresAt,
+              } satisfies ActiveConsolationDto)
+            : null
+        }
+        onRefresh={loadStatus}
+      />
 
       {/* silenciar warning de lint sobre lastSpin no usado directamente */}
       {lastSpin ? null : null}

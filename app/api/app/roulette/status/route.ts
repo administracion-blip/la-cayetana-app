@@ -20,6 +20,15 @@ function serializeStatus(status: RouletteStatus) {
         shadow: status.activePrize.shadow,
       }
     : null;
+  const activeConsolation = status.activeConsolation
+    ? {
+        consolationId: status.activeConsolation.consolationId,
+        rewardType: status.activeConsolation.rewardType,
+        rewardLabel: status.activeConsolation.rewardLabel,
+        awardedAt: status.activeConsolation.awardedAt,
+        expiresAt: status.activeConsolation.expiresAt,
+      }
+    : null;
   return {
     cycleId: status.cycleId,
     spinsRemaining: status.spinsRemaining,
@@ -27,6 +36,7 @@ function serializeStatus(status: RouletteStatus) {
     disabled: status.disabled,
     shadow: status.shadow,
     activePrize,
+    activeConsolation,
   };
 }
 

@@ -198,7 +198,25 @@ export type RouletteEntityType =
   | "ROULETTE_CYCLE"
   | "ROULETTE_USER_CYCLE"
   | "ROULETTE_SPIN"
-  | "ROULETTE_PRIZE";
+  | "ROULETTE_PRIZE"
+  | "ROULETTE_CONSOLATION";
+
+/**
+ * Estados del premio de consolación ("rasca"):
+ *  - `awarded`: vivo y rascable/canjeable.
+ *  - `redeemed`: validado en taquilla por un usuario con `canValidatePrizes`.
+ *  - `expired`: caducado por tiempo (`expiresAt`).
+ *
+ * No existe un estado `discarded` para el rasca (a diferencia del premio
+ * de ruleta): un regalo de consolación no se descarta voluntariamente.
+ */
+export type ConsolationStatus = "awarded" | "redeemed" | "expired";
+
+/**
+ * Tipos de recompensa de consolación. De momento solo existe uno, pero el
+ * campo es extensible sin migración si en el futuro se añaden variantes.
+ */
+export type ConsolationRewardType = "discount_1eur_drinks";
 
 /** Mapa de inventario por tipo de premio (stock inicial / restante). */
 export type PrizeStockMap = Record<PrizeType, number>;
@@ -231,6 +249,22 @@ export interface RouletteConfigRecord {
   shadowMembershipId: string;
   /** Probabilidad de ganar para el usuario shadow (0..1). */
   shadowWinRate: number;
+  /**
+   * Si es `true`, al perder todas las tiradas del ciclo sin ganar ningún
+   * premio el backend genera automáticamente un "rasca" de consolación
+   * (`ROULETTE_CONSOLATION`) en la misma transacción. El usuario shadow
+   * (CY1000) queda siempre excluido de este flujo.
+   */
+  consolationEnabled: boolean;
+  /**
+   * Ventana de canje del rasca en segundos (contado desde `awardedAt`).
+   * Por defecto 1200 (20 min).
+   */
+  consolationWindowSec: number;
+  /** Tipo de recompensa del rasca. */
+  consolationRewardType: ConsolationRewardType;
+  /** Etiqueta visible al rascar (ej: "DESCUENTO DE 1€ EN TUS COPAS"). */
+  consolationRewardLabel: string;
   updatedAt: string;
   updatedByUserId?: string;
 }
@@ -278,6 +312,13 @@ export interface RouletteUserCycleRecord {
   lastSpinAt?: string;
   /** prizeId del premio vivo si lo hay; se limpia al canjear/caducar. */
   activePrizeId?: string | null;
+  /**
+   * consolationId del rasca generado en este ciclo (si se generó). Sirve
+   * de centinela de idempotencia: la transacción que crea el rasca incluye
+   * `attribute_not_exists(consolationId)` para evitar duplicados ante
+   * reintentos o condiciones de carrera. No se limpia al canjear/caducar.
+   */
+  consolationId?: string | null;
 }
 
 /**
@@ -334,4 +375,52 @@ export interface RoulettePrizeRecord {
   /** userId del socio que descartó (en la práctica, el propio dueño). */
   discardedByUserId?: string | null;
   shadow: boolean;
+}
+
+/**
+ * Premio de consolación ("rasca") que se genera automáticamente cuando un
+ * socio gasta todas las tiradas del ciclo sin ganar ningún premio.
+ *
+ * Vive en la misma tabla single-table `la_cayetana_roulette` para compartir
+ * patrón de claves y GSIs con el resto de ítems. Mantiene entidad y estados
+ * propios para no interferir con `ROULETTE_PRIZE` (stock, `targetWinRate`,
+ * etc.).
+ *
+ * Claves:
+ *  - `PK = "CONSOLATION#<consolationId>"`, `SK = "META"`.
+ *  - GSI1 (`by-user-prize`): `GSI1PK = "USER#<userId>"`,
+ *    `GSI1SK = "CONSOLATION#<awardedAt-ISO>"` — permite listar rascas de un
+ *    socio por fecha, compartiendo índice con los premios (se diferencian
+ *    por el prefijo del SK).
+ *  - GSI2 (`by-prize-status`): `GSI2PK = "CONSOLATION_STATUS#<status>"`,
+ *    `GSI2SK = expiresAt` — permite barrer rascas pendientes por estado si
+ *    hiciera falta un job de limpieza (hoy la expiración es lazy).
+ *
+ * CY1000 (usuario shadow) nunca recibe este ítem.
+ */
+export interface RouletteConsolationRecord {
+  PK: `CONSOLATION#${string}`;
+  SK: "META";
+  /** Partición del socio en el GSI1 (reutilizado con los PRIZE). */
+  GSI1PK?: `USER#${string}`;
+  /** Prefijo `CONSOLATION#…` (distinto de `PRIZE#…`) para poder filtrar. */
+  GSI1SK?: `CONSOLATION#${string}`;
+  /** Se actualiza al cambiar de estado para que GSI2 lo refleje. */
+  GSI2PK?: `CONSOLATION_STATUS#${ConsolationStatus}`;
+  GSI2SK?: string;
+  entityType: "ROULETTE_CONSOLATION";
+  consolationId: string;
+  userId: string;
+  membershipId?: string;
+  /** Ciclo de ruleta en cuyo contexto se emitió (yyyy-MM-dd local). */
+  cycleId: string;
+  rewardType: ConsolationRewardType;
+  /** Snapshot de la etiqueta mostrada al usuario (ej. "DESCUENTO DE 1€…"). */
+  rewardLabel: string;
+  status: ConsolationStatus;
+  awardedAt: string;
+  /** ISO. El backend marca `expired` cuando `now >= expiresAt`. */
+  expiresAt: string;
+  redeemedAt?: string | null;
+  redeemedByUserId?: string | null;
 }

@@ -16,10 +16,13 @@ import {
   getUserByMembershipId,
 } from "@/lib/repositories/users";
 import type {
+  ConsolationRewardType,
+  ConsolationStatus,
   PrizeStatus,
   PrizeStockMap,
   PrizeType,
   RouletteConfigRecord,
+  RouletteConsolationRecord,
   RouletteCycleRecord,
   RoulettePrizeRecord,
   RouletteSpinRecord,
@@ -43,6 +46,7 @@ import type {
  *   - ROULETTE_USER_CYCLE   · PK=CYCLE#yyyy-MM-dd    SK=USER#<userId>
  *   - ROULETTE_SPIN         · PK=CYCLE#…|SHADOW#…    SK=SPIN#<iso>#<spinId>
  *   - ROULETTE_PRIZE        · PK=PRIZE#<prizeId>     SK=META
+ *   - ROULETTE_CONSOLATION  · PK=CONSOLATION#<id>    SK=META
  */
 
 // ─── Constantes de claves ─────────────────────────────────────────────────
@@ -73,6 +77,10 @@ export const PRIZE_LABEL: Record<PrizeType, string> = {
   botella: "1 Botella",
 };
 
+/** Etiqueta por defecto del rasca (mostrada al revelar). */
+export const DEFAULT_CONSOLATION_REWARD_LABEL =
+  "DESCUENTO DE 1€ EN TUS COPAS" as const;
+
 /** Config por defecto al iniciar `CONFIG#CURRENT` la primera vez. */
 export const DEFAULT_ROULETTE_CONFIG: Omit<
   RouletteConfigRecord,
@@ -92,6 +100,10 @@ export const DEFAULT_ROULETTE_CONFIG: Omit<
   },
   shadowMembershipId: "CY1000",
   shadowWinRate: 0.75,
+  consolationEnabled: true,
+  consolationWindowSec: 20 * 60,
+  consolationRewardType: "discount_1eur_drinks",
+  consolationRewardLabel: DEFAULT_CONSOLATION_REWARD_LABEL,
 };
 
 // ─── Helpers de claves ────────────────────────────────────────────────────
@@ -132,6 +144,24 @@ export function prizeStatusGsi2Pk(
 /** Partición de ítems shadow (aislados del flujo operativo). */
 export function shadowPk(membershipId: string): `SHADOW#${string}` {
   return `SHADOW#${membershipId}`;
+}
+
+export function consolationPk(
+  consolationId: string,
+): `CONSOLATION#${string}` {
+  return `CONSOLATION#${consolationId}`;
+}
+
+export function consolationGsi1Sk(
+  awardedAtIso: string,
+): `CONSOLATION#${string}` {
+  return `CONSOLATION#${awardedAtIso}`;
+}
+
+export function consolationStatusGsi2Pk(
+  status: ConsolationStatus,
+): `CONSOLATION_STATUS#${ConsolationStatus}` {
+  return `CONSOLATION_STATUS#${status}`;
 }
 
 // ─── Errores ──────────────────────────────────────────────────────────────
@@ -187,6 +217,20 @@ export class ValidatorNotAuthorizedError extends RouletteError {
   }
 }
 
+export class ConsolationNotFoundError extends RouletteError {
+  constructor() {
+    super("CONSOLATION_NOT_FOUND", "Premio de consolación no encontrado");
+    this.name = "ConsolationNotFoundError";
+  }
+}
+
+export class ConsolationNotClaimableError extends RouletteError {
+  constructor(message: string) {
+    super("CONSOLATION_NOT_CLAIMABLE", message);
+    this.name = "ConsolationNotClaimableError";
+  }
+}
+
 // ─── Contratos de retorno ─────────────────────────────────────────────────
 
 export interface ActiveCycle {
@@ -201,7 +245,25 @@ export interface RouletteStatus {
   spinsPerCycle: number;
   disabled: boolean;
   activePrize: RoulettePrizeRecord | null;
+  /**
+   * Rasca vivo del socio (si lo hay). Solo aplica a usuarios no-shadow. El
+   * backend hace limpieza perezosa: si está `awarded` y su `expiresAt` ya
+   * pasó, lo transiciona a `expired` y devuelve `null`.
+   */
+  activeConsolation: RouletteConsolationRecord | null;
   shadow: boolean;
+}
+
+/**
+ * Metadatos del rasca recién creado, expuestos en la respuesta del SPIN
+ * cuando la tirada actual ha disparado la creación automática. El cliente
+ * puede abrir el sobre sin necesidad de volver a pedir `/status`.
+ */
+export interface SpinConsolationInfo {
+  consolationId: string;
+  rewardType: ConsolationRewardType;
+  rewardLabel: string;
+  expiresAt: string;
 }
 
 export interface SpinResult {
@@ -211,6 +273,8 @@ export interface SpinResult {
   expiresAt: string | null;
   spinsRemaining: number | null;
   shadow: boolean;
+  /** Rasca generado en esta misma tirada, si procedía. */
+  consolation: SpinConsolationInfo | null;
 }
 
 export interface RedeemResult {
@@ -418,6 +482,9 @@ export async function updateConfig(input: {
       | "shadowMembershipId"
       | "shadowWinRate"
       | "timezone"
+      | "consolationEnabled"
+      | "consolationWindowSec"
+      | "consolationRewardLabel"
     >
   >;
 }): Promise<RouletteConfigRecord> {
@@ -464,6 +531,23 @@ export async function updateConfig(input: {
             1,
             Math.max(0, input.patch.shadowWinRate),
           ),
+        }
+      : {}),
+    ...(typeof input.patch.consolationEnabled === "boolean"
+      ? { consolationEnabled: input.patch.consolationEnabled }
+      : {}),
+    ...(typeof input.patch.consolationWindowSec === "number"
+      ? {
+          consolationWindowSec: Math.max(
+            60,
+            Math.floor(input.patch.consolationWindowSec),
+          ),
+        }
+      : {}),
+    ...(typeof input.patch.consolationRewardLabel === "string" &&
+    input.patch.consolationRewardLabel.trim().length > 0
+      ? {
+          consolationRewardLabel: input.patch.consolationRewardLabel.trim(),
         }
       : {}),
     updatedAt: new Date().toISOString(),
@@ -709,6 +793,187 @@ export async function expirePrizeIfDue(prizeId: string): Promise<void> {
   }
 }
 
+// ─── CONSOLACIÓN: lectura, caducidad y canje ──────────────────────────────
+
+async function getConsolation(
+  consolationId: string,
+): Promise<RouletteConsolationRecord | null> {
+  const doc = getDocClient();
+  const { ROULETTE_TABLE_NAME } = getEnv();
+  const res = await doc.send(
+    new GetCommand({
+      TableName: ROULETTE_TABLE_NAME,
+      Key: { PK: consolationPk(consolationId), SK: "META" },
+    }),
+  );
+  const item = res.Item as RouletteConsolationRecord | undefined;
+  if (!item || item.entityType !== "ROULETTE_CONSOLATION") return null;
+  return item;
+}
+
+/**
+ * Último rasca del socio consultado vía GSI1. Filtra por prefijo del SK
+ * (`CONSOLATION#…`) para diferenciar de los PRIZE que comparten el índice.
+ */
+async function getLatestConsolationForUser(
+  userId: string,
+): Promise<RouletteConsolationRecord | null> {
+  const doc = getDocClient();
+  const { ROULETTE_TABLE_NAME } = getEnv();
+  const res = await doc.send(
+    new QueryCommand({
+      TableName: ROULETTE_TABLE_NAME,
+      IndexName: GSI_BY_USER_PRIZE,
+      KeyConditionExpression:
+        "GSI1PK = :pk AND begins_with(GSI1SK, :prefix)",
+      ExpressionAttributeValues: {
+        ":pk": userGsi1Pk(userId),
+        ":prefix": "CONSOLATION#",
+      },
+      ScanIndexForward: false,
+      Limit: 1,
+    }),
+  );
+  const item = res.Items?.[0] as RouletteConsolationRecord | undefined;
+  if (!item || item.entityType !== "ROULETTE_CONSOLATION") return null;
+  return item;
+}
+
+/**
+ * Si el rasca está `awarded` y su `expiresAt` ya pasó, lo marca `expired`.
+ * A diferencia de los PRIZE no hay stock que devolver ni USER_CYCLE que
+ * limpiar (el centinela `consolationId` se mantiene para preservar la
+ * idempotencia del ciclo).
+ *
+ * Idempotente: si no está en `awarded`, no-op.
+ */
+export async function expireConsolationIfDue(
+  consolationId: string,
+): Promise<void> {
+  const doc = getDocClient();
+  const { ROULETTE_TABLE_NAME } = getEnv();
+  const cons = await getConsolation(consolationId);
+  if (!cons) return;
+  if (cons.status !== "awarded") return;
+  if (new Date(cons.expiresAt).getTime() > Date.now()) return;
+  try {
+    await doc.send(
+      new UpdateCommand({
+        TableName: ROULETTE_TABLE_NAME,
+        Key: { PK: consolationPk(consolationId), SK: "META" },
+        UpdateExpression: "SET #status = :expired, GSI2PK = :gsi2pk",
+        ConditionExpression: "#status = :awarded",
+        ExpressionAttributeNames: { "#status": "status" },
+        ExpressionAttributeValues: {
+          ":expired": "expired" satisfies ConsolationStatus,
+          ":awarded": "awarded" satisfies ConsolationStatus,
+          ":gsi2pk": consolationStatusGsi2Pk("expired"),
+        },
+      }),
+    );
+  } catch (err: unknown) {
+    const name =
+      err && typeof err === "object" && "name" in err
+        ? String((err as { name: string }).name)
+        : "";
+    if (name !== "ConditionalCheckFailedException") throw err;
+  }
+}
+
+export interface ConsolationRedeemResult {
+  consolationId: string;
+  rewardType: ConsolationRewardType;
+  rewardLabel: string;
+  redeemedAt: string;
+  validatorName: string;
+}
+
+/**
+ * Canjea el rasca del socio. Requiere QR de un validador autorizado
+ * (`canValidatePrizes = true`, `status = "active"`, distinto del dueño).
+ * Operación atómica: la `ConditionExpression` garantiza un solo uso y el
+ * respeto a la caducidad aunque el cliente haya manipulado su reloj.
+ */
+export async function redeemConsolation(input: {
+  userId: string;
+  consolationId: string;
+  qrText: string;
+}): Promise<ConsolationRedeemResult> {
+  const doc = getDocClient();
+  const { ROULETTE_TABLE_NAME } = getEnv();
+
+  const cons = await getConsolation(input.consolationId);
+  if (!cons) throw new ConsolationNotFoundError();
+  if (cons.userId !== input.userId) {
+    throw new ConsolationNotClaimableError("Este premio no te pertenece");
+  }
+  if (cons.status === "redeemed") {
+    throw new ConsolationNotClaimableError("El premio ya se canjeó");
+  }
+  if (cons.status === "expired") {
+    throw new ConsolationNotClaimableError("El premio ha caducado");
+  }
+  if (new Date(cons.expiresAt).getTime() <= Date.now()) {
+    await expireConsolationIfDue(input.consolationId);
+    throw new ConsolationNotClaimableError("El premio ha caducado");
+  }
+
+  const validatorCy = extractMembershipIdFromQr(input.qrText);
+  if (!validatorCy) throw new ValidatorNotAuthorizedError();
+  const validator = await getUserByMembershipId(validatorCy);
+  if (
+    !validator ||
+    validator.status !== "active" ||
+    validator.canValidatePrizes !== true ||
+    validator.id === input.userId
+  ) {
+    throw new ValidatorNotAuthorizedError();
+  }
+
+  const nowIso = new Date().toISOString();
+
+  try {
+    await doc.send(
+      new UpdateCommand({
+        TableName: ROULETTE_TABLE_NAME,
+        Key: { PK: consolationPk(input.consolationId), SK: "META" },
+        UpdateExpression:
+          "SET #status = :redeemed, redeemedAt = :now, redeemedByUserId = :by, GSI2PK = :gsi2pk",
+        ConditionExpression:
+          "#status = :awarded AND expiresAt > :now AND userId = :userId",
+        ExpressionAttributeNames: { "#status": "status" },
+        ExpressionAttributeValues: {
+          ":redeemed": "redeemed" satisfies ConsolationStatus,
+          ":awarded": "awarded" satisfies ConsolationStatus,
+          ":now": nowIso,
+          ":by": validator.id,
+          ":userId": input.userId,
+          ":gsi2pk": consolationStatusGsi2Pk("redeemed"),
+        },
+      }),
+    );
+  } catch (err: unknown) {
+    const name =
+      err && typeof err === "object" && "name" in err
+        ? String((err as { name: string }).name)
+        : "";
+    if (name === "ConditionalCheckFailedException") {
+      throw new ConsolationNotClaimableError(
+        "El premio ya no se puede canjear",
+      );
+    }
+    throw err;
+  }
+
+  return {
+    consolationId: input.consolationId,
+    rewardType: cons.rewardType,
+    rewardLabel: cons.rewardLabel,
+    redeemedAt: nowIso,
+    validatorName: validator.name,
+  };
+}
+
 // ─── STATUS: estado que consume el feed ───────────────────────────────────
 
 /**
@@ -744,8 +1009,22 @@ export async function getStatusForUser(
       spinsPerCycle: config.spinsPerCycle,
       disabled: false,
       activePrize,
+      activeConsolation: null,
       shadow: true,
     };
+  }
+
+  // Limpieza perezosa del último rasca: si estaba `awarded` con TTL vencido,
+  // lo pasa a `expired` antes de responder. Solo se considera "activo" si
+  // sigue `awarded` y dentro de ventana.
+  const latestConsolation = await getLatestConsolationForUser(userId);
+  let activeConsolation: RouletteConsolationRecord | null = null;
+  if (latestConsolation && latestConsolation.status === "awarded") {
+    if (new Date(latestConsolation.expiresAt).getTime() <= Date.now()) {
+      await expireConsolationIfDue(latestConsolation.consolationId);
+    } else {
+      activeConsolation = latestConsolation;
+    }
   }
 
   const userCycle = await getUserCycle(cycle.cycleId, userId);
@@ -758,6 +1037,7 @@ export async function getStatusForUser(
     spinsPerCycle: config.spinsPerCycle,
     disabled,
     activePrize,
+    activeConsolation,
     shadow: false,
   };
 }
@@ -922,6 +1202,7 @@ async function runShadowSpin(input: {
       expiresAt: null,
       spinsRemaining: null,
       shadow: true,
+      consolation: null,
     };
   }
 
@@ -978,6 +1259,7 @@ async function runShadowSpin(input: {
     expiresAt,
     spinsRemaining: null,
     shadow: true,
+    consolation: null,
   };
 }
 
@@ -1017,6 +1299,7 @@ async function runRealSpin(input: {
     cycle,
     decision,
     spinsUsedBefore: spinsUsed,
+    prizesWonBefore: prizesWon,
   });
   return result;
 }
@@ -1027,8 +1310,10 @@ async function commitRealSpin(input: {
   cycle: ActiveCycle;
   decision: PrizeDecision;
   spinsUsedBefore: number;
+  prizesWonBefore: number;
 }): Promise<SpinResult> {
-  const { user, config, cycle, decision, spinsUsedBefore } = input;
+  const { user, config, cycle, decision, spinsUsedBefore, prizesWonBefore } =
+    input;
   const doc = getDocClient();
   const { ROULETTE_TABLE_NAME } = getEnv();
 
@@ -1039,6 +1324,24 @@ async function commitRealSpin(input: {
     decision.outcome === "win"
       ? new Date(Date.now() + config.redeemWindowSec * 1000).toISOString()
       : null;
+
+  // ── Consolación automática ─────────────────────────────────────────────
+  // Se emite cuando, tras esta tirada perdedora, el socio habrá gastado
+  // todas las tiradas del ciclo sin ganar ningún premio. Se escribe en la
+  // MISMA TransactWriteCommand que el SPIN y el USER_CYCLE, con un
+  // centinela (`consolationId` sobre USER_CYCLE + `attribute_not_exists`)
+  // que evita duplicados en reintentos o condiciones de carrera.
+  //
+  // CY1000 nunca llega aquí porque `runShadowSpin` corta antes.
+  const shouldCreateConsolation =
+    config.consolationEnabled === true &&
+    decision.outcome === "lose" &&
+    prizesWonBefore === 0 &&
+    spinsUsedBefore + 1 === config.spinsPerCycle;
+  const consolationId = shouldCreateConsolation ? randomUUID() : null;
+  const consolationExpiresAt = shouldCreateConsolation
+    ? new Date(Date.now() + config.consolationWindowSec * 1000).toISOString()
+    : null;
 
   const spin: RouletteSpinRecord = {
     PK: cyclePk(cycle.cycleId),
@@ -1107,6 +1410,13 @@ async function commitRealSpin(input: {
     // Refuerzo: no permitir doble premio en el mismo ciclo.
     userCycleCondition = `(attribute_not_exists(spinsUsed) OR spinsUsed < :max) AND (attribute_not_exists(prizesWon) OR prizesWon < :one)`;
   }
+  if (shouldCreateConsolation && consolationId) {
+    // Centinela de idempotencia: si ya existe `consolationId` en el
+    // USER_CYCLE, la transacción entera falla y no se crea otro rasca.
+    userCycleUpdateParts.push("consolationId = :consolationId");
+    userCycleValues[":consolationId"] = consolationId;
+    userCycleCondition = `${userCycleCondition} AND attribute_not_exists(consolationId)`;
+  }
 
   const transactItems: TransactItems = [
     {
@@ -1174,6 +1484,35 @@ async function commitRealSpin(input: {
     });
   }
 
+  if (shouldCreateConsolation && consolationId && consolationExpiresAt) {
+    const consolation: RouletteConsolationRecord = {
+      PK: consolationPk(consolationId),
+      SK: "META",
+      GSI1PK: userGsi1Pk(user.id),
+      GSI1SK: consolationGsi1Sk(nowIso),
+      GSI2PK: consolationStatusGsi2Pk("awarded"),
+      GSI2SK: consolationExpiresAt,
+      entityType: "ROULETTE_CONSOLATION",
+      consolationId,
+      userId: user.id,
+      membershipId: user.membershipId,
+      cycleId: cycle.cycleId,
+      rewardType: config.consolationRewardType,
+      rewardLabel: config.consolationRewardLabel,
+      status: "awarded",
+      awardedAt: nowIso,
+      expiresAt: consolationExpiresAt,
+      redeemedAt: null,
+      redeemedByUserId: null,
+    };
+    transactItems.push({
+      Put: {
+        TableName: ROULETTE_TABLE_NAME,
+        Item: consolation,
+      },
+    });
+  }
+
   try {
     await doc.send(new TransactWriteCommand({ TransactItems: transactItems }));
   } catch (err: unknown) {
@@ -1204,6 +1543,7 @@ async function commitRealSpin(input: {
           loseReason: "no_stock",
         },
         spinsUsedBefore,
+        prizesWonBefore,
       });
     }
     throw err;
@@ -1217,6 +1557,15 @@ async function commitRealSpin(input: {
     expiresAt,
     spinsRemaining: Math.max(0, config.spinsPerCycle - newSpinsUsed),
     shadow: false,
+    consolation:
+      shouldCreateConsolation && consolationId && consolationExpiresAt
+        ? {
+            consolationId,
+            rewardType: config.consolationRewardType,
+            rewardLabel: config.consolationRewardLabel,
+            expiresAt: consolationExpiresAt,
+          }
+        : null,
   };
 }
 
@@ -1448,9 +1797,12 @@ export async function discardPrize(input: {
 // ─── Re-exports útiles ────────────────────────────────────────────────────
 
 export type {
+  ConsolationRewardType,
+  ConsolationStatus,
   PrizeStockMap,
   PrizeType,
   RouletteConfigRecord,
+  RouletteConsolationRecord,
   RouletteCycleRecord,
   RoulettePrizeRecord,
   RouletteSpinRecord,

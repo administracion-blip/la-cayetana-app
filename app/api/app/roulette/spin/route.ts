@@ -32,6 +32,7 @@ export async function POST() {
       expiresAt: result.expiresAt,
       spinsRemaining: result.spinsRemaining,
       shadow: result.shadow,
+      consolation: result.consolation,
     });
   } catch (err) {
     if (err instanceof NoSpinsLeftError) {
