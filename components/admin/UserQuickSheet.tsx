@@ -11,6 +11,8 @@ type Props = {
   onClose: () => void;
   onActivate: (user: SafeUser) => void;
   onDelivery: (user: SafeUser, action: "deliver" | "undo") => void;
+  /** Activar, renovar y entrega (solo administradores completos en el panel Socios). */
+  canManageMemberActions?: boolean;
   /** Abre el modal de permisos (admin) y normalmente se cierra la ficha. */
   onOpenPermissions?: (user: SafeUser) => void;
   /**
@@ -117,6 +119,7 @@ export function UserQuickSheet({
   onClose,
   onActivate,
   onDelivery,
+  canManageMemberActions = true,
   onOpenPermissions,
   backdropPointerEventsNone = false,
 }: Props) {
@@ -199,60 +202,62 @@ export function UserQuickSheet({
           </dl>
         </div>
 
-        <footer className="shrink-0 border-t border-border bg-zinc-50 px-4 py-3">
-          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-end">
-            {user.status === "pending_payment" || user.status === "inactive" ? (
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => onActivate(user)}
-                className="inline-flex min-h-[44px] items-center justify-center rounded-xl bg-brand px-4 text-sm font-medium text-white hover:bg-brand-hover disabled:opacity-60 sm:min-h-0 sm:px-5 sm:py-2.5"
-              >
-                {busy ? "Activando…" : "Activar"}
-              </button>
-            ) : null}
-
-            {user.status === "active" && !paidThisYear ? (
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => onActivate(user)}
-                className="inline-flex min-h-[44px] items-center justify-center rounded-xl border border-border bg-white px-4 text-sm font-medium text-foreground hover:bg-zinc-50 disabled:opacity-60 sm:min-h-0 sm:px-5 sm:py-2.5"
-              >
-                {busy ? "…" : "Renovar"}
-              </button>
-            ) : null}
-
-            {user.status === "active" ? (
-              delivered ? (
+        {canManageMemberActions ? (
+          <footer className="shrink-0 border-t border-border bg-zinc-50 px-4 py-3">
+            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-end">
+              {user.status === "pending_payment" || user.status === "inactive" ? (
                 <button
                   type="button"
                   disabled={busy}
-                  onClick={() => onDelivery(user, "undo")}
+                  onClick={() => onActivate(user)}
+                  className="inline-flex min-h-[44px] items-center justify-center rounded-xl bg-brand px-4 text-sm font-medium text-white hover:bg-brand-hover disabled:opacity-60 sm:min-h-0 sm:px-5 sm:py-2.5"
+                >
+                  {busy ? "Activando…" : "Activar"}
+                </button>
+              ) : null}
+
+              {user.status === "active" && !paidThisYear ? (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => onActivate(user)}
                   className="inline-flex min-h-[44px] items-center justify-center rounded-xl border border-border bg-white px-4 text-sm font-medium text-foreground hover:bg-zinc-50 disabled:opacity-60 sm:min-h-0 sm:px-5 sm:py-2.5"
                 >
-                  {busy ? "…" : "Deshacer entrega"}
+                  {busy ? "…" : "Renovar"}
                 </button>
-              ) : (
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => onDelivery(user, "deliver")}
-                  className="inline-flex min-h-[48px] w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:opacity-60 sm:ml-0 sm:w-auto sm:min-w-[12rem]"
-                >
-                  {busy ? (
-                    "Guardando…"
-                  ) : (
-                    <>
-                      <PackageCheckIcon className="h-5 w-5 shrink-0" />
-                      Marcar entregado
-                    </>
-                  )}
-                </button>
-              )
-            ) : null}
-          </div>
-        </footer>
+              ) : null}
+
+              {user.status === "active" ? (
+                delivered ? (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => onDelivery(user, "undo")}
+                    className="inline-flex min-h-[44px] items-center justify-center rounded-xl border border-border bg-white px-4 text-sm font-medium text-foreground hover:bg-zinc-50 disabled:opacity-60 sm:min-h-0 sm:px-5 sm:py-2.5"
+                  >
+                    {busy ? "…" : "Deshacer entrega"}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => onDelivery(user, "deliver")}
+                    className="inline-flex min-h-[48px] w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:opacity-60 sm:ml-0 sm:w-auto sm:min-w-[12rem]"
+                  >
+                    {busy ? (
+                      "Guardando…"
+                    ) : (
+                      <>
+                        <PackageCheckIcon className="h-5 w-5 shrink-0" />
+                        Marcar entregado
+                      </>
+                    )}
+                  </button>
+                )
+              ) : null}
+            </div>
+          </footer>
+        ) : null}
       </div>
     </div>
   );

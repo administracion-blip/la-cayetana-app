@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireAdminForApi } from "@/lib/auth/admin";
+import { requireProgramacionAdminForApi } from "@/lib/auth/admin";
 import { getEnv } from "@/lib/env";
 import {
   deleteEvent,
@@ -16,7 +16,7 @@ export async function GET(
   _req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const auth = await requireAdminForApi();
+  const auth = await requireProgramacionAdminForApi();
   if (!auth.ok) return auth.response;
   const { id } = await params;
   const event = await getEventById(id);
@@ -30,7 +30,7 @@ export async function PATCH(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const auth = await requireAdminForApi();
+  const auth = await requireProgramacionAdminForApi();
   if (!auth.ok) return auth.response;
   const { id } = await params;
 
@@ -102,7 +102,7 @@ export async function DELETE(
   _req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const auth = await requireAdminForApi();
+  const auth = await requireProgramacionAdminForApi();
   if (!auth.ok) return auth.response;
   const { id } = await params;
   const existing = await getEventById(id);

@@ -6,34 +6,49 @@ import type { UserRecord } from "@/types/models";
 type SafeUser = Omit<UserRecord, "passwordHash">;
 
 export type UserPermissionsPayload = {
-  isAdmin: boolean;
   canValidatePrizes: boolean;
   canManageReservations: boolean;
   canReplyReservationChats: boolean;
   canEditReservationConfig: boolean;
   canManageReservationDocuments: boolean;
   canWriteReservationNotes: boolean;
+  canEditUserPermissions: boolean;
+  canAccessAdmin: boolean;
+  canAccessAdminSocios: boolean;
+  canManageSociosActions: boolean;
+  canAccessAdminReservas: boolean;
+  canAccessAdminProgramacion: boolean;
 };
 
 const ALL_OFF: UserPermissionsPayload = {
-  isAdmin: false,
   canValidatePrizes: false,
   canManageReservations: false,
   canReplyReservationChats: false,
   canEditReservationConfig: false,
   canManageReservationDocuments: false,
   canWriteReservationNotes: false,
+  canEditUserPermissions: false,
+  canAccessAdmin: false,
+  canAccessAdminSocios: false,
+  canManageSociosActions: false,
+  canAccessAdminReservas: false,
+  canAccessAdminProgramacion: false,
 };
 
 export function userToPermissionsPayload(u: SafeUser): UserPermissionsPayload {
   return {
-    isAdmin: u.isAdmin === true,
     canValidatePrizes: u.canValidatePrizes === true,
     canManageReservations: u.canManageReservations === true,
     canReplyReservationChats: u.canReplyReservationChats === true,
     canEditReservationConfig: u.canEditReservationConfig === true,
     canManageReservationDocuments: u.canManageReservationDocuments === true,
     canWriteReservationNotes: u.canWriteReservationNotes === true,
+    canEditUserPermissions: u.canEditUserPermissions === true,
+    canAccessAdmin: u.canAccessAdmin === true,
+    canAccessAdminSocios: u.canAccessAdminSocios === true,
+    canManageSociosActions: u.canManageSociosActions === true,
+    canAccessAdminReservas: u.canAccessAdminReservas === true,
+    canAccessAdminProgramacion: u.canAccessAdminProgramacion === true,
   };
 }
 
@@ -41,9 +56,29 @@ const ROW_META: Record<
   keyof UserPermissionsPayload,
   { label: string; hint: string; needsActive?: boolean }
 > = {
-  isAdmin: {
+  canAccessAdmin: {
     label: "Acceso al panel de administración",
-    hint: "Socios, registro, reservas (según el resto de permisos), etc.",
+    hint: "Permite ver el hub /admin. Las tarjetas que aparezcan dependen del resto de permisos.",
+  },
+  canEditUserPermissions: {
+    label: "Editar permisos de socios",
+    hint: "Llave maestra del backoffice: puede entrar a Socios y cambiar cualquier permiso (incluido el suyo) desde este modal.",
+  },
+  canAccessAdminSocios: {
+    label: "Acceso a Administración · Socios",
+    hint: "Entra a /admin/users (listado, búsqueda, escaneo). Las acciones (activar, entrega, Excel) requieren además el flag de gestión.",
+  },
+  canManageSociosActions: {
+    label: "Acciones sobre socios",
+    hint: "Activar/renovar, marcar como entregado y deshacer entrega, importar y exportar Excel.",
+  },
+  canAccessAdminReservas: {
+    label: "Acceso a Administración · Reservas",
+    hint: "Entra al tablero de reservas. Las acciones siguen dependiendo de los permisos del propio módulo.",
+  },
+  canAccessAdminProgramacion: {
+    label: "Acceso a Administración · Programación",
+    hint: "Crea y edita los eventos del feed.",
   },
   canValidatePrizes: {
     label: "Validador de canjes (taquilla)",
@@ -78,7 +113,19 @@ const PERMISSION_SECTIONS: {
   subtitle?: string;
   keys: (keyof UserPermissionsPayload)[];
 }[] = [
-  { id: "general", title: "General", keys: ["isAdmin"] },
+  {
+    id: "general",
+    title: "Acceso al backoffice",
+    subtitle: "Puerta del panel y permisos por sección",
+    keys: [
+      "canAccessAdmin",
+      "canEditUserPermissions",
+      "canAccessAdminSocios",
+      "canManageSociosActions",
+      "canAccessAdminReservas",
+      "canAccessAdminProgramacion",
+    ],
+  },
   {
     id: "ruleta",
     title: "Ruleta",
@@ -88,7 +135,7 @@ const PERMISSION_SECTIONS: {
   {
     id: "reservas",
     title: "Reservas",
-    subtitle: "Módulo de mesas y menús",
+    subtitle: "Permisos dentro del módulo de reservas",
     keys: [
       "canManageReservations",
       "canReplyReservationChats",
@@ -119,24 +166,27 @@ export function UserPermissionsModal({ user, onClose, onSaved }: Props) {
 
   const active = user.status === "active";
 
-  const allOn = useCallback((): UserPermissionsPayload => {
-    return {
-      isAdmin: true,
+  const allOn = useCallback(
+    (): UserPermissionsPayload => ({
       canValidatePrizes: active,
       canManageReservations: true,
       canReplyReservationChats: true,
       canEditReservationConfig: true,
       canManageReservationDocuments: true,
       canWriteReservationNotes: true,
-    };
-  }, [active]);
+      canEditUserPermissions: true,
+      canAccessAdmin: true,
+      canAccessAdminSocios: true,
+      canManageSociosActions: true,
+      canAccessAdminReservas: true,
+      canAccessAdminProgramacion: true,
+    }),
+    [active],
+  );
 
   const setSection = useCallback(
     (keys: (keyof UserPermissionsPayload)[], value: boolean) => {
       setForm((prev) => {
-        if (!value && keys.length === 1 && keys[0] === "isAdmin") {
-          return { ...ALL_OFF };
-        }
         const next: UserPermissionsPayload = { ...prev };
         for (const k of keys) {
           if (k === "canValidatePrizes" && value && !active) {
@@ -151,15 +201,7 @@ export function UserPermissionsModal({ user, onClose, onSaved }: Props) {
   );
 
   const toggle = (key: keyof UserPermissionsPayload) => {
-    setForm((prev) => {
-      if (key === "isAdmin") {
-        if (prev.isAdmin) {
-          return { ...ALL_OFF };
-        }
-        return { ...prev, isAdmin: true };
-      }
-      return { ...prev, [key]: !prev[key] };
-    });
+    setForm((prev) => ({ ...prev, [key]: !prev[key] }));
   };
 
   const handleSave = async () => {
@@ -187,24 +229,25 @@ export function UserPermissionsModal({ user, onClose, onSaved }: Props) {
         );
         return;
       }
+      const flagOrUndef = (b: boolean) => (b ? true : undefined);
       onSaved({
         ...user,
-        ...form,
-        canValidatePrizes: form.canValidatePrizes ? true : undefined,
-        canManageReservations: form.canManageReservations ? true : undefined,
-        canReplyReservationChats: form.canReplyReservationChats
-          ? true
-          : undefined,
-        canEditReservationConfig: form.canEditReservationConfig
-          ? true
-          : undefined,
-        canManageReservationDocuments: form.canManageReservationDocuments
-          ? true
-          : undefined,
-        canWriteReservationNotes: form.canWriteReservationNotes
-          ? true
-          : undefined,
-        isAdmin: form.isAdmin ? true : undefined,
+        canValidatePrizes: flagOrUndef(form.canValidatePrizes),
+        canManageReservations: flagOrUndef(form.canManageReservations),
+        canReplyReservationChats: flagOrUndef(form.canReplyReservationChats),
+        canEditReservationConfig: flagOrUndef(form.canEditReservationConfig),
+        canManageReservationDocuments: flagOrUndef(
+          form.canManageReservationDocuments,
+        ),
+        canWriteReservationNotes: flagOrUndef(form.canWriteReservationNotes),
+        canEditUserPermissions: flagOrUndef(form.canEditUserPermissions),
+        canAccessAdmin: flagOrUndef(form.canAccessAdmin),
+        canAccessAdminSocios: flagOrUndef(form.canAccessAdminSocios),
+        canManageSociosActions: flagOrUndef(form.canManageSociosActions),
+        canAccessAdminReservas: flagOrUndef(form.canAccessAdminReservas),
+        canAccessAdminProgramacion: flagOrUndef(
+          form.canAccessAdminProgramacion,
+        ),
       } satisfies SafeUser);
       onClose();
     } catch {
@@ -236,6 +279,14 @@ export function UserPermissionsModal({ user, onClose, onSaved }: Props) {
           <p className="mt-0.5 font-mono text-xs text-muted">
             {user.membershipId ?? "—"} · {user.email}
           </p>
+          {user.isAdmin ? (
+            <p className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] leading-snug text-amber-900">
+              Esta cuenta tiene <strong>isAdmin</strong> (legado): equivale a
+              tener todos los permisos. Edita los flags concretos abajo y, si
+              quieres dejar de depender de <code>isAdmin</code>, retíralo desde
+              la base de datos.
+            </p>
+          ) : null}
           <div className="mt-3 flex flex-wrap gap-2">
             <button
               type="button"
@@ -264,10 +315,11 @@ export function UserPermissionsModal({ user, onClose, onSaved }: Props) {
 
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
           <p className="mb-3 text-xs leading-snug text-muted">
-            <strong>General</strong> cubre el acceso al panel.{" "}
-            <strong>Reservas</strong> aplica si tiene permisos o es admin (según
-            la lógica del sistema). El validador de <strong>Ruleta</strong>{" "}
-            solo para socios <strong>activos</strong>.
+            Cada permiso es independiente. <strong>Acceso al panel</strong> da
+            entrada al hub; los flags por sección abren cada apartado.{" "}
+            <strong>Acciones sobre socios</strong> habilita activar, entregas y
+            Excel. <strong>Editar permisos</strong> es la llave maestra.{" "}
+            <strong>Ruleta</strong> solo aplica a socios <strong>activos</strong>.
           </p>
 
           {PERMISSION_SECTIONS.map((section) => {
@@ -287,7 +339,9 @@ export function UserPermissionsModal({ user, onClose, onSaved }: Props) {
                   <div className="flex shrink-0 flex-wrap gap-1">
                     <button
                       type="button"
-                      disabled={saving || (section.id === "ruleta" && !active)}
+                      disabled={
+                        saving || (section.id === "ruleta" && !active)
+                      }
                       onClick={() => {
                         setErr(null);
                         if (section.id === "ruleta" && !active) return;

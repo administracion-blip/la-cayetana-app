@@ -7,10 +7,10 @@ import { PinToHomeScreenModal } from "@/components/app/PinToHomeScreenModal";
 import { Bars3Icon } from "@/components/icons/Bars3Icon";
 
 type Props = {
-  isAdmin: boolean;
+  showAdminLink: boolean;
 };
 
-export function AppHeaderMenu({ isAdmin }: Props) {
+export function AppHeaderMenu({ showAdminLink }: Props) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const [pinOpen, setPinOpen] = useState(false);
@@ -88,7 +88,7 @@ export function AppHeaderMenu({ isAdmin }: Props) {
             >
               Perfil
             </Link>
-            {isAdmin ? (
+            {showAdminLink ? (
               <Link
                 href="/admin"
                 role="menuitem"

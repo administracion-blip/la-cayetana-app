@@ -1,6 +1,12 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { AdminExcelActions } from "@/components/admin/AdminExcelActions";
 import { AdminUsersClient } from "@/components/admin/AdminUsersClient";
+import {
+  getAdminAreaUserOrRedirect,
+  userCanAccessAdminSociosSection,
+  userCanManageSociosActions,
+} from "@/lib/auth/admin";
 import { listUsersAndDrafts } from "@/lib/repositories/users";
 import type { UserRecord } from "@/types/models";
 
@@ -14,9 +20,14 @@ function stripPassword(u: UserRecord) {
 }
 
 export default async function AdminUsersPage() {
+  const currentUser = await getAdminAreaUserOrRedirect();
+  if (!userCanAccessAdminSociosSection(currentUser)) {
+    redirect("/admin");
+  }
   // Incluimos los drafts pendientes de pago (flujo de activación manual).
   const users = await listUsersAndDrafts();
   const safe = users.map(stripPassword);
+  const currentSafe = stripPassword(currentUser);
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-10">
@@ -30,14 +41,18 @@ export default async function AdminUsersPage() {
           </Link>
           <h1 className="mt-2 text-2xl font-semibold">Administración · Socios</h1>
           <p className="mt-1 text-sm text-muted">
-            Solo usuarios con <code className="text-xs">isAdmin: true</code> en
-            DynamoDB pueden ver esta página.
+            Listado: <code className="text-xs">canAccessAdminSocios</code>,{" "}
+            <code className="text-xs">canManageSociosActions</code> o{" "}
+            <code className="text-xs">canEditUserPermissions</code>. Activar,
+            entregas e import/export Excel:{" "}
+            <code className="text-xs">canManageSociosActions</code>. Editar
+            permisos: <code className="text-xs">canEditUserPermissions</code>.
           </p>
         </div>
-        <AdminExcelActions />
+        {userCanManageSociosActions(currentUser) ? <AdminExcelActions /> : null}
       </div>
 
-      <AdminUsersClient users={safe} />
+      <AdminUsersClient users={safe} currentUser={currentSafe} />
     </div>
   );
 }

@@ -67,7 +67,14 @@ export interface UserRecord {
   welcomeEmailSent?: boolean;
   exportedToAgora: boolean;
   exportedAt?: string;
-  /** Solo gestión en Dynamo; no se expone en APIs públicas ni carnet. `false` en altas nuevas. */
+  /**
+   * Legacy / superpermiso. Mantenido por compatibilidad con cuentas existentes:
+   * cuando es `true`, equivale a tener todos los flags de acceso/capacidad de
+   * administración (entrada al panel, secciones, gestión de socios, reservas
+   * y programación). El nuevo modelo de permisos va por flags concretos
+   * (`canAccessAdmin`, `canAccessAdminSocios`, `canManageSociosActions`, etc.)
+   * y `isAdmin` ya no se promueve desde la UI.
+   */
   isAdmin?: boolean;
   /** Indica que el socio fue importado masivamente (legacy). */
   legacy?: boolean;
@@ -103,6 +110,36 @@ export interface UserRecord {
   canManageReservationDocuments?: boolean;
   /** Staff: puede escribir notas internas (visibles solo para staff) en una reserva. */
   canWriteReservationNotes?: boolean;
+  /**
+   * Permite editar permisos de otros socios desde el modal. Llave “maestra”
+   * dentro del backoffice: quien tenga esto puede cambiar cualquier flag
+   * (incluido el suyo). Implica acceso a `/admin/users`.
+   */
+  canEditUserPermissions?: boolean;
+  /**
+   * Puerta del área de administración (`/admin`). Quien lo tenga ve el hub
+   * (aunque luego solo aparezcan las tarjetas para las que tenga sección).
+   */
+  canAccessAdmin?: boolean;
+  /**
+   * Acceso a Administración · Socios (`/admin/users`).
+   */
+  canAccessAdminSocios?: boolean;
+  /**
+   * Acciones de socios: activar/renovar, marcar entregado / deshacer entrega,
+   * importar y exportar Excel. Sin este flag el panel de socios queda en
+   * modo solo lectura para esa cuenta.
+   */
+  canManageSociosActions?: boolean;
+  /**
+   * Acceso al backoffice de reservas (`/admin/reservas`). Las acciones dentro
+   * dependen de los permisos finos del módulo.
+   */
+  canAccessAdminReservas?: boolean;
+  /**
+   * Acceso a Administración · Programación (`/admin/programacion`).
+   */
+  canAccessAdminProgramacion?: boolean;
 }
 
 /** Token de un solo uso para restablecer contraseña (misma tabla Dynamo que users). */

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
-import { requireAdminForApi } from "@/lib/auth/admin";
+import { requireProgramacionAdminForApi } from "@/lib/auth/admin";
 import { getEnv } from "@/lib/env";
 import { putObject } from "@/lib/s3";
 import { sniffUploadOrWarn } from "@/lib/upload/sniff";
@@ -32,7 +32,7 @@ const EXTENSION: Record<string, string> = {
  * `/api/programacion/image?key=...`.
  */
 export async function POST(req: Request) {
-  const auth = await requireAdminForApi();
+  const auth = await requireProgramacionAdminForApi();
   if (!auth.ok) return auth.response;
 
   let form: FormData;

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { getAdminProgramacionUserOrRedirect } from "@/lib/auth/admin";
 import { listAllEvents } from "@/lib/repositories/programacion";
 
 export const dynamic = "force-dynamic";
@@ -14,6 +15,7 @@ function formatDateTime(iso: string): string {
 }
 
 export default async function AdminProgramacionPage() {
+  await getAdminProgramacionUserOrRedirect();
   const events = await listAllEvents();
 
   return (

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { AppHeaderMenu } from "@/components/app/AppHeaderMenu";
 import { CarnetHeaderButton } from "@/components/app/CarnetHeaderButton";
+import { userCanAccessAdminArea } from "@/lib/auth/admin";
 import { getSessionFromCookies } from "@/lib/auth/session";
 import { getUserById } from "@/lib/repositories/users";
 
@@ -23,7 +24,7 @@ export default async function PrivateLayout({
     <div className="flex min-h-full flex-col">
       <header className="sticky top-0 z-[100] border-b border-border bg-white">
         <div className="mx-auto flex max-w-lg items-center gap-2 px-4 py-3 sm:gap-3">
-          <AppHeaderMenu isAdmin={user.isAdmin === true} />
+          <AppHeaderMenu showAdminLink={userCanAccessAdminArea(user)} />
           <Link
             href="/app"
             aria-label="La Cayetana Granada"

@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requireAdminForApi } from "@/lib/auth/admin";
+import {
+  requireSociosActionsForApi,
+  userCanManageSociosActions,
+} from "@/lib/auth/admin";
 import {
   BonoDeliveryError,
   getUserById,
@@ -23,7 +26,7 @@ export async function POST(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const auth = await requireAdminForApi();
+  const auth = await requireSociosActionsForApi();
   if (!auth.ok) return auth.response;
 
   const { id } = await params;
@@ -55,7 +58,7 @@ export async function POST(
       if (
         !authorizer ||
         authorizer.entityType !== "USER" ||
-        !authorizer.isAdmin
+        !userCanManageSociosActions(authorizer)
       ) {
         return NextResponse.json({ error: UNAUTHORIZED_UNDO }, { status: 403 });
       }

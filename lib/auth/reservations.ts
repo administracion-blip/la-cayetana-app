@@ -101,9 +101,16 @@ export function isGuestSessionStillValid(
  * de abajo. Un socio normal nunca es staff.
  */
 export function userIsReservationStaff(
-  user: Pick<UserRecord, "isAdmin" | "canManageReservations">,
+  user: Pick<
+    UserRecord,
+    "isAdmin" | "canManageReservations" | "canAccessAdminReservas"
+  >,
 ): boolean {
-  return !!user.isAdmin || !!user.canManageReservations;
+  return (
+    !!user.isAdmin ||
+    !!user.canManageReservations ||
+    user.canAccessAdminReservas === true
+  );
 }
 
 export function userCanManageReservations(

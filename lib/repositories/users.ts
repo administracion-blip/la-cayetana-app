@@ -818,6 +818,12 @@ export type AdminUserPatch = {
   canEditReservationConfig?: boolean;
   canManageReservationDocuments?: boolean;
   canWriteReservationNotes?: boolean;
+  canEditUserPermissions?: boolean;
+  canAccessAdmin?: boolean;
+  canAccessAdminSocios?: boolean;
+  canManageSociosActions?: boolean;
+  canAccessAdminReservas?: boolean;
+  canAccessAdminProgramacion?: boolean;
 };
 
 /** Actualiza campos editables desde el panel admin / import Excel (por `id` de usuario). */
@@ -894,6 +900,38 @@ export async function updateUserFieldsById(
   resPerm("canEditReservationConfig");
   resPerm("canManageReservationDocuments");
   resPerm("canWriteReservationNotes");
+  if (patch.canEditUserPermissions !== undefined) {
+    if (patch.canEditUserPermissions === true) {
+      names["#cEUP"] = "canEditUserPermissions";
+      values[":cEUP"] = true;
+      setParts.push("#cEUP = :cEUP");
+    } else {
+      removeAttrs.push("canEditUserPermissions");
+    }
+  }
+  type SectionAccessKey =
+    | "canAccessAdmin"
+    | "canAccessAdminSocios"
+    | "canManageSociosActions"
+    | "canAccessAdminReservas"
+    | "canAccessAdminProgramacion";
+  const sectionAccess = (attr: SectionAccessKey) => {
+    const v = patch[attr];
+    if (v === undefined) return;
+    const nk = attr.replace(/[^a-zA-Z0-9]/g, "_");
+    if (v === true) {
+      names[`#s_${nk}`] = attr;
+      values[`:s_${nk}`] = true;
+      setParts.push(`#s_${nk} = :s_${nk}`);
+    } else {
+      removeAttrs.push(attr);
+    }
+  };
+  sectionAccess("canAccessAdmin");
+  sectionAccess("canAccessAdminSocios");
+  sectionAccess("canManageSociosActions");
+  sectionAccess("canAccessAdminReservas");
+  sectionAccess("canAccessAdminProgramacion");
 
   if (setParts.length === 0 && removeAttrs.length === 0) return;
 

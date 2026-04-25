@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireAdminForApi } from "@/lib/auth/admin";
+import { requireProgramacionAdminForApi } from "@/lib/auth/admin";
 import {
   createEvent,
   listAllEvents,
@@ -9,14 +9,14 @@ import { eventSchema } from "@/lib/validation";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const auth = await requireAdminForApi();
+  const auth = await requireProgramacionAdminForApi();
   if (!auth.ok) return auth.response;
   const events = await listAllEvents();
   return NextResponse.json({ events });
 }
 
 export async function POST(req: Request) {
-  const auth = await requireAdminForApi();
+  const auth = await requireProgramacionAdminForApi();
   if (!auth.ok) return auth.response;
 
   let json: unknown;

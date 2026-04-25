@@ -327,9 +327,11 @@ export function ReservationsHome({ config, viewer }: Props) {
     <div className="space-y-4">
       <section className="rounded-2xl border border-border bg-white p-5 shadow-sm">
         <h2 className="text-lg font-semibold">Hola{viewer.name ? `, ${viewer.name.split(" ")[0]}` : ""}</h2>
-        <p className="mt-1 text-sm text-muted">
-          Tienes {active.length}{" "}
-          {active.length === 1 ? "reserva activa" : "reservas activas"}.
+        <p className="mt-2">
+          <span className="inline-flex items-center rounded-xl border border-amber-200/90 bg-amber-100/85 px-3 py-1.5 text-sm font-semibold text-amber-950 shadow-sm">
+            Tienes {active.length}{" "}
+            {active.length === 1 ? "reserva activa" : "reservas activas"}.
+          </span>
         </p>
         <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
           <button

@@ -1,32 +1,43 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requireAdminForApi } from "@/lib/auth/admin";
+import { requireUserPermissionsEditorForApi } from "@/lib/auth/admin";
 import {
   getUserById,
   updateUserFieldsById,
 } from "@/lib/repositories/users";
 
 const bodySchema = z.object({
-  isAdmin: z.boolean(),
   canValidatePrizes: z.boolean(),
   canManageReservations: z.boolean(),
   canReplyReservationChats: z.boolean(),
   canEditReservationConfig: z.boolean(),
   canManageReservationDocuments: z.boolean(),
   canWriteReservationNotes: z.boolean(),
+  canEditUserPermissions: z.boolean(),
+  canAccessAdmin: z.boolean(),
+  canAccessAdminSocios: z.boolean(),
+  canManageSociosActions: z.boolean(),
+  canAccessAdminReservas: z.boolean(),
+  canAccessAdminProgramacion: z.boolean(),
 });
 
 /**
  * `POST /api/admin/users/:id/permissions`
  *
- * Actualiza permisos de panel / ruleta / reservas de un socio en una sola
- * operación. Solo administradores.
+ * Actualiza permisos de panel / ruleta / reservas de un socio.
+ * Quien tenga `canEditUserPermissions` (o `isAdmin` legacy) puede tocar todos
+ * los flags listados arriba — incluida la entrega/retirada de
+ * `canEditUserPermissions` mismo.
+ *
+ * `isAdmin` ya no se modifica por API: es legacy y permanece tal y como esté
+ * en la cuenta. La entrada al backoffice se controla con `canAccessAdmin` y
+ * los permisos por sección.
  */
 export async function POST(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const auth = await requireAdminForApi();
+  const auth = await requireUserPermissionsEditorForApi();
   if (!auth.ok) return auth.response;
 
   const { id } = await params;
@@ -69,27 +80,38 @@ export async function POST(
   }
 
   const b = parsed.data;
+
   await updateUserFieldsById(id, {
-    isAdmin: b.isAdmin,
     canValidatePrizes: b.canValidatePrizes,
     canManageReservations: b.canManageReservations,
     canReplyReservationChats: b.canReplyReservationChats,
     canEditReservationConfig: b.canEditReservationConfig,
     canManageReservationDocuments: b.canManageReservationDocuments,
     canWriteReservationNotes: b.canWriteReservationNotes,
+    canEditUserPermissions: b.canEditUserPermissions,
+    canAccessAdmin: b.canAccessAdmin,
+    canAccessAdminSocios: b.canAccessAdminSocios,
+    canManageSociosActions: b.canManageSociosActions,
+    canAccessAdminReservas: b.canAccessAdminReservas,
+    canAccessAdminProgramacion: b.canAccessAdminProgramacion,
   });
 
   return NextResponse.json({
     ok: true,
     user: {
       id,
-      isAdmin: b.isAdmin,
       canValidatePrizes: b.canValidatePrizes,
       canManageReservations: b.canManageReservations,
       canReplyReservationChats: b.canReplyReservationChats,
       canEditReservationConfig: b.canEditReservationConfig,
       canManageReservationDocuments: b.canManageReservationDocuments,
       canWriteReservationNotes: b.canWriteReservationNotes,
+      canEditUserPermissions: b.canEditUserPermissions,
+      canAccessAdmin: b.canAccessAdmin,
+      canAccessAdminSocios: b.canAccessAdminSocios,
+      canManageSociosActions: b.canManageSociosActions,
+      canAccessAdminReservas: b.canAccessAdminReservas,
+      canAccessAdminProgramacion: b.canAccessAdminProgramacion,
     },
   });
 }

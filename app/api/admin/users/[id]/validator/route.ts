@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requireAdminForApi } from "@/lib/auth/admin";
+import { requireSociosActionsForApi } from "@/lib/auth/admin";
 import {
   getUserById,
   updateUserFieldsById,
@@ -18,7 +18,7 @@ export async function POST(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const auth = await requireAdminForApi();
+  const auth = await requireSociosActionsForApi();
   if (!auth.ok) return auth.response;
 
   const { id } = await params;

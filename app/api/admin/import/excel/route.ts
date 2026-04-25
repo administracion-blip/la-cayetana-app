@@ -1,6 +1,6 @@
 import * as XLSX from "xlsx";
 import { NextResponse } from "next/server";
-import { requireAdminForApi } from "@/lib/auth/admin";
+import { requireSociosActionsForApi } from "@/lib/auth/admin";
 import {
   listUsers,
   updateUserFieldsById,
@@ -16,7 +16,7 @@ const MAX_ROWS = 2000;
 
 export async function POST(request: Request) {
   try {
-    const auth = await requireAdminForApi();
+    const auth = await requireSociosActionsForApi();
     if (!auth.ok) return auth.response;
 
     const ct = request.headers.get("content-type") ?? "";

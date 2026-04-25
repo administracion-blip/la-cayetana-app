@@ -1,4 +1,4 @@
-import { getAdminUserOrRedirect } from "@/lib/auth/admin";
+import { getAdminAreaUserOrRedirect } from "@/lib/auth/admin";
 
 export const dynamic = "force-dynamic";
 
@@ -7,6 +7,6 @@ export default async function AdminLayout({
 }: {
   children: React.ReactNode;
 }) {
-  await getAdminUserOrRedirect();
+  await getAdminAreaUserOrRedirect();
   return <>{children}</>;
 }

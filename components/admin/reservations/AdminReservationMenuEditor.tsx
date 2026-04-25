@@ -279,17 +279,17 @@ export function AdminReservationMenuEditor({
               key={offerId}
               className="flex flex-wrap items-start justify-between gap-2 rounded-lg border border-border px-3 py-2"
             >
-              <div>
-                <span className="text-sm font-medium">
+              <div className="min-w-0 rounded-lg border border-rose-200/80 bg-rose-50/80 px-2.5 py-1.5">
+                <span className="text-sm font-semibold text-rose-900">
                   {nameForOffer(offerId)}
                 </span>
                 {o && o.active === false ? (
-                  <span className="ml-2 text-xs text-amber-700">
+                  <span className="ml-2 text-xs text-amber-800">
                     (inactivo en carta)
                   </span>
                 ) : null}
                 {o ? (
-                  <span className="ml-1 text-xs text-muted">
+                  <span className="ml-1 text-xs font-medium text-rose-800/80">
                     {formatAmountEuros(o.priceCents)} / u.
                   </span>
                 ) : null}

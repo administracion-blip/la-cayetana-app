@@ -141,6 +141,74 @@ body {
   }
 }
 
+/* Cohetes / destellos animados tras canje en ruleta (señal anti-captura). */
+.redeem-rocket-strip {
+  display: flex;
+  justify-content: center;
+  align-items: flex-end;
+  gap: 0.35rem;
+  padding: 0.35rem 0 0.15rem;
+  min-height: 2.75rem;
+}
+
+.redeem-rocket {
+  display: inline-block;
+  line-height: 1;
+  font-size: clamp(1.45rem, 5vw, 1.95rem);
+  filter: drop-shadow(0 2px 5px rgba(209, 47, 47, 0.35));
+  animation: redeem-rocket-bob 0.88s ease-in-out infinite;
+}
+
+.redeem-rocket:nth-child(1) {
+  animation-delay: 0s;
+}
+.redeem-rocket:nth-child(2) {
+  animation-delay: 0.12s;
+}
+.redeem-rocket:nth-child(3) {
+  animation-delay: 0.24s;
+}
+.redeem-rocket:nth-child(4) {
+  animation-delay: 0.36s;
+}
+.redeem-rocket:nth-child(5) {
+  animation-delay: 0.48s;
+}
+
+@keyframes redeem-rocket-bob {
+  0%,
+  100% {
+    transform: translateY(0) scale(1) rotate(-16deg);
+  }
+  50% {
+    transform: translateY(-14px) scale(1.06) rotate(10deg);
+  }
+}
+
+.redeem-live-dot {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 9999px;
+  background: var(--brand);
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--brand) 55%, transparent);
+  animation: redeem-live-dot-pulse 1.25s ease-out infinite;
+}
+
+@keyframes redeem-live-dot-pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--brand) 50%, transparent);
+    opacity: 1;
+  }
+  70% {
+    box-shadow: 0 0 0 8px color-mix(in srgb, var(--brand) 0%, transparent);
+    opacity: 0.9;
+  }
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--brand) 0%, transparent);
+    opacity: 1;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .live-border-card::before {
     animation: none;
@@ -148,6 +216,12 @@ body {
     background: var(--brand);
   }
   .live-border-dot::before {
+    animation: none;
+  }
+  .redeem-rocket {
+    animation: none;
+  }
+  .redeem-live-dot {
     animation: none;
   }
   .redeem-ok-check-wrap {

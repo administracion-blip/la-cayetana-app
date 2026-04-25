@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { EventForm } from "@/components/admin/programacion/EventForm";
+import { getAdminProgramacionUserOrRedirect } from "@/lib/auth/admin";
 import { getEventById } from "@/lib/repositories/programacion";
 
 export const dynamic = "force-dynamic";
@@ -10,6 +11,7 @@ export default async function EditEventPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
+  await getAdminProgramacionUserOrRedirect();
   const { id } = await params;
   const event = await getEventById(id);
   if (!event) notFound();

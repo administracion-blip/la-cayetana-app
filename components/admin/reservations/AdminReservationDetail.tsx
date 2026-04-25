@@ -380,8 +380,10 @@ function Summary({
       </div>
       {prepayMsgOpen ? (
         <PrepaymentMessageDialog
+          reservationId={reservation.reservationId}
           message={reservation.prepaymentInstructions ?? ""}
           phone={reservation.contact.phone}
+          email={reservation.contact.email}
           copied={prepayMsgCopied}
           onCopied={() => setPrepayMsgCopied(true)}
           onClose={() => setPrepayMsgOpen(false)}
@@ -1500,14 +1502,18 @@ function toWhatsAppNumber(phone: string): string {
 }
 
 function PrepaymentMessageDialog({
+  reservationId,
   message,
   phone,
+  email,
   copied,
   onCopied,
   onClose,
 }: {
+  reservationId: string;
   message: string;
   phone: string;
+  email: string;
   copied: boolean;
   onCopied: () => void;
   onClose: () => void;
@@ -1516,6 +1522,13 @@ function PrepaymentMessageDialog({
   const waUrl = waNumber
     ? `https://wa.me/${waNumber}?text=${encodeURIComponent(message)}`
     : "";
+
+  const [emailStatus, setEmailStatus] = useState<
+    "idle" | "sending" | "sent" | "error"
+  >("idle");
+  const [emailError, setEmailError] = useState<string | null>(null);
+
+  const trimmedEmail = email.trim();
 
   const handleCopy = async () => {
     try {
@@ -1534,6 +1547,34 @@ function PrepaymentMessageDialog({
       onCopied();
     } catch (err) {
       console.warn("[prepayment-dialog] copy failed", err);
+    }
+  };
+
+  const handleSendEmail = async () => {
+    if (!trimmedEmail || emailStatus === "sending") return;
+    setEmailStatus("sending");
+    setEmailError(null);
+    try {
+      const res = await fetch(
+        `/api/admin/reservations/${reservationId}/prepayment/remind-email`,
+        { method: "POST" },
+      );
+      if (!res.ok) {
+        let msg = "No se pudo enviar el correo.";
+        try {
+          const data = (await res.json()) as { error?: string };
+          if (data?.error) msg = data.error;
+        } catch {
+          // ignore body parse errors
+        }
+        setEmailError(msg);
+        setEmailStatus("error");
+        return;
+      }
+      setEmailStatus("sent");
+    } catch (err) {
+      setEmailError(err instanceof Error ? err.message : "Error de red");
+      setEmailStatus("error");
     }
   };
 
@@ -1565,8 +1606,8 @@ function PrepaymentMessageDialog({
           </button>
         </div>
         <p className="mt-1 text-xs text-muted">
-          Mensaje predeterminado con los datos de esta reserva. Puedes copiarlo
-          o reenviarlo por WhatsApp al teléfono del cliente.
+          Mensaje predeterminado con los datos de esta reserva. Puedes copiarlo,
+          reenviarlo por WhatsApp o enviarlo por correo al cliente.
         </p>
         <textarea
           readOnly
@@ -1574,6 +1615,22 @@ function PrepaymentMessageDialog({
           className="mt-3 h-56 w-full resize-y rounded-xl border border-border bg-muted/20 p-3 text-sm leading-relaxed"
           onFocus={(e) => e.currentTarget.select()}
         />
+        {emailStatus === "sent" ? (
+          <p
+            className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-800"
+            role="status"
+          >
+            Correo enviado a {trimmedEmail}.
+          </p>
+        ) : null}
+        {emailStatus === "error" && emailError ? (
+          <p
+            className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-800"
+            role="alert"
+          >
+            {emailError}
+          </p>
+        ) : null}
         <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
           <button
             type="button"
@@ -1582,6 +1639,22 @@ function PrepaymentMessageDialog({
           >
             {copied ? "Copiado ✓" : "Copiar"}
           </button>
+          {trimmedEmail ? (
+            <button
+              type="button"
+              onClick={() => void handleSendEmail()}
+              disabled={emailStatus === "sending"}
+              className="rounded-full border border-sky-200 bg-sky-50 px-3 py-1.5 text-xs font-medium text-sky-800 shadow-sm hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {emailStatus === "sending"
+                ? "Enviando…"
+                : emailStatus === "sent"
+                ? "Reenviar por mail"
+                : "Enviar por mail"}
+            </button>
+          ) : (
+            <span className="text-xs text-muted">Sin email para enviar</span>
+          )}
           {waUrl ? (
             <a
               href={waUrl}

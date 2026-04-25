@@ -133,6 +133,12 @@ function deliveryRank(u: SafeUser): number {
 function permissionScore(u: SafeUser): number {
   let n = 0;
   if (u.isAdmin) n++;
+  if (u.canEditUserPermissions) n++;
+  if (u.canAccessAdmin) n++;
+  if (u.canAccessAdminSocios) n++;
+  if (u.canManageSociosActions) n++;
+  if (u.canAccessAdminReservas) n++;
+  if (u.canAccessAdminProgramacion) n++;
   if (u.canValidatePrizes) n++;
   if (u.canManageReservations) n++;
   if (u.canReplyReservationChats) n++;
@@ -195,7 +201,20 @@ function compareUsers(
 
 type QuickFilter = "all" | "pendingPayment" | "pendingDelivery";
 
-export function AdminUsersClient({ users }: { users: SafeUser[] }) {
+export function AdminUsersClient({
+  users,
+  currentUser,
+}: {
+  users: SafeUser[];
+  currentUser: SafeUser;
+}) {
+  const canManageUsersFully =
+    currentUser.isAdmin === true ||
+    currentUser.canManageSociosActions === true;
+  const canEditPermissionsUI =
+    currentUser.isAdmin === true ||
+    currentUser.canEditUserPermissions === true;
+
   const [q, setQ] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("membershipId");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
@@ -228,7 +247,10 @@ export function AdminUsersClient({ users }: { users: SafeUser[] }) {
     [sortKey],
   );
 
-  const stickyNameColLeft = STICKY_CHECKBOX_COL_PX + widths.membershipId;
+  const stickyLeftBase = canManageUsersFully
+    ? STICKY_CHECKBOX_COL_PX
+    : 0;
+  const stickyNameColLeft = stickyLeftBase + widths.membershipId;
 
   // La ficha se deriva de `rows` para reflejar actualizaciones (p.ej. tras
   // activar o marcar entregado la ficha muestra el nuevo estado sin cerrarse).
@@ -598,7 +620,7 @@ export function AdminUsersClient({ users }: { users: SafeUser[] }) {
           setScanNoMatchCy(cy);
           return;
         }
-        if (!authorizer.isAdmin) {
+        if (!authorizer.isAdmin && !authorizer.canManageSociosActions) {
           setAuthDeniedOpen(true);
           return;
         }
@@ -669,6 +691,13 @@ export function AdminUsersClient({ users }: { users: SafeUser[] }) {
       case "status": {
         if (u.status === "pending_payment") {
           const busy = pendingId === u.id;
+          if (!canManageUsersFully) {
+            return (
+              <span className="inline-flex items-center rounded-full bg-amber-50 px-1.5 py-0 text-[10px] font-medium leading-tight text-amber-700 ring-1 ring-inset ring-amber-200">
+                Pendiente pago
+              </span>
+            );
+          }
           return (
             <div className="flex flex-wrap items-center gap-1">
               <span className="inline-flex items-center rounded-full bg-amber-50 px-1.5 py-0 text-[10px] font-medium leading-tight text-amber-700 ring-1 ring-inset ring-amber-200">
@@ -688,6 +717,13 @@ export function AdminUsersClient({ users }: { users: SafeUser[] }) {
         }
         if (u.status === "inactive") {
           const busy = pendingId === u.id;
+          if (!canManageUsersFully) {
+            return (
+              <span className="inline-flex items-center rounded-full bg-zinc-100 px-1.5 py-0 text-[10px] font-medium leading-tight text-zinc-700 ring-1 ring-inset ring-zinc-200">
+                Inactivo
+              </span>
+            );
+          }
           return (
             <div className="flex flex-wrap items-center gap-1">
               <span className="inline-flex items-center rounded-full bg-zinc-100 px-1.5 py-0 text-[10px] font-medium leading-tight text-zinc-700 ring-1 ring-inset ring-zinc-200">
@@ -710,6 +746,13 @@ export function AdminUsersClient({ users }: { users: SafeUser[] }) {
         const currentYear = new Date().getUTCFullYear();
         const paidThisYear =
           u.paidAt && new Date(u.paidAt).getUTCFullYear() === currentYear;
+        if (!canManageUsersFully) {
+          return (
+            <span className="inline-flex items-center rounded-full bg-emerald-50 px-1.5 py-0 text-[10px] font-medium leading-tight text-emerald-700 ring-1 ring-inset ring-emerald-200">
+              Activo
+            </span>
+          );
+        }
         return (
           <div className="flex flex-wrap items-center gap-1">
             <span className="inline-flex items-center rounded-full bg-emerald-50 px-1.5 py-0 text-[10px] font-medium leading-tight text-emerald-700 ring-1 ring-inset ring-emerald-200">
@@ -741,6 +784,32 @@ export function AdminUsersClient({ users }: { users: SafeUser[] }) {
         }
         const delivered = u.deliveryStatus === "delivered";
         const busy = pendingId === u.id;
+        if (!canManageUsersFully) {
+          return delivered ? (
+            <span
+              className="inline-flex max-w-full items-center rounded-full bg-emerald-50 px-1.5 py-0 text-[10px] font-medium leading-tight text-emerald-700 ring-1 ring-inset ring-emerald-200"
+              title={
+                u.deliveredAt
+                  ? `Entregado ${new Date(u.deliveredAt).toLocaleString("es-ES")}`
+                  : "Entregado"
+              }
+            >
+              <span className="truncate">Entregado</span>
+              {u.deliveredAt ? (
+                <span className="ml-0.5 shrink-0 font-normal text-emerald-600">
+                  {new Date(u.deliveredAt).toLocaleDateString("es-ES", {
+                    day: "2-digit",
+                    month: "2-digit",
+                  })}
+                </span>
+              ) : null}
+            </span>
+          ) : (
+            <span className="inline-flex items-center rounded-full bg-amber-50 px-1.5 py-0 text-[10px] font-medium leading-tight text-amber-700 ring-1 ring-inset ring-amber-200">
+              Pendiente
+            </span>
+          );
+        }
         return (
           <div className="flex flex-wrap items-center gap-1">
             {delivered ? (
@@ -814,6 +883,9 @@ export function AdminUsersClient({ users }: { users: SafeUser[] }) {
           </span>
         );
       case "permissions": {
+        if (!canEditPermissionsUI) {
+          return <span className="text-muted">—</span>;
+        }
         const busy = pendingId === u.id;
         return (
           <button
@@ -843,19 +915,21 @@ export function AdminUsersClient({ users }: { users: SafeUser[] }) {
             Buscar por nombre, email o número
           </label>
           <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => {
-                setUndoDeliveryTarget(null);
-                setScannerOpen(true);
-              }}
-              className="inline-flex min-h-[48px] shrink-0 items-center gap-2 rounded-xl border border-teal-200 bg-teal-100 px-4 py-2.5 text-sm font-semibold text-teal-900 shadow-sm ring-1 ring-teal-300/40 transition-colors hover:bg-teal-200/90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-500"
-              aria-label="Escanear QR de socio"
-              title="Abrir cámara y escanear el carnet"
-            >
-              <QrScanIcon className="h-5 w-5 text-teal-700" />
-              Escanear
-            </button>
+            {canManageUsersFully ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setUndoDeliveryTarget(null);
+                  setScannerOpen(true);
+                }}
+                className="inline-flex min-h-[48px] shrink-0 items-center gap-2 rounded-xl border border-teal-200 bg-teal-100 px-4 py-2.5 text-sm font-semibold text-teal-900 shadow-sm ring-1 ring-teal-300/40 transition-colors hover:bg-teal-200/90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-500"
+                aria-label="Escanear QR de socio"
+                title="Abrir cámara y escanear el carnet"
+              >
+                <QrScanIcon className="h-5 w-5 text-teal-700" />
+                Escanear
+              </button>
+            ) : null}
             <input
               id="search"
               type="search"
@@ -934,7 +1008,7 @@ export function AdminUsersClient({ users }: { users: SafeUser[] }) {
         </div>
       </div>
 
-      {selectedUsers.length > 0 ? (
+      {canManageUsersFully && selectedUsers.length > 0 ? (
         <div className="mb-4 hidden flex-col gap-2 rounded-xl border border-brand/25 bg-brand/5 px-3 py-2.5 text-sm md:flex sm:flex-row sm:flex-wrap sm:items-center">
           <span className="font-medium text-foreground">
             {selectedUsers.length}{" "}
@@ -1086,7 +1160,7 @@ export function AdminUsersClient({ users }: { users: SafeUser[] }) {
                 type="checkbox"
                 checked={selectedIds.has(u.id)}
                 onChange={() => toggleSelectOne(u.id)}
-                className="mt-1 hidden h-4 w-4 shrink-0 accent-brand md:block"
+                className={`mt-1 h-4 w-4 shrink-0 accent-brand ${canManageUsersFully ? "hidden md:block" : "hidden"}`}
                 aria-label={`Seleccionar ${u.name}`}
               />
               <div className="min-w-0 flex-1">
@@ -1144,13 +1218,15 @@ export function AdminUsersClient({ users }: { users: SafeUser[] }) {
                 {cellValue(u, "deliveryStatus")}
               </div>
             </div>
-            <button
-              type="button"
-              onClick={() => setPermissionsUser(u)}
-              className="mt-2.5 w-full rounded-xl border border-border py-2 text-xs font-medium text-foreground hover:bg-zinc-50"
-            >
-              Editar permisos
-            </button>
+            {canEditPermissionsUI ? (
+              <button
+                type="button"
+                onClick={() => setPermissionsUser(u)}
+                className="mt-2.5 w-full rounded-xl border border-border py-2 text-xs font-medium text-foreground hover:bg-zinc-50"
+              >
+                Editar permisos
+              </button>
+            ) : null}
           </article>
         ))}
       </div>
@@ -1162,22 +1238,24 @@ export function AdminUsersClient({ users }: { users: SafeUser[] }) {
         >
           <thead className="border-b border-border bg-zinc-50">
             <tr>
-              <th
-                scope="col"
-                style={{ width: STICKY_CHECKBOX_COL_PX, minWidth: STICKY_CHECKBOX_COL_PX }}
-                className="sticky left-0 z-30 border-r border-border/80 bg-zinc-50 px-0.5 py-1 align-middle font-medium shadow-[2px_0_4px_rgba(0,0,0,0.04)]"
-              >
-                <input
-                  ref={selectAllCheckboxRef}
-                  type="checkbox"
-                  checked={allVisibleSelected}
-                  onChange={toggleSelectAllVisible}
-                  disabled={sorted.length === 0}
-                  className="h-4 w-4 accent-brand disabled:opacity-40"
-                  aria-label="Seleccionar todos los socios visibles en la tabla"
-                  title="Seleccionar o deseleccionar la vista actual"
-                />
-              </th>
+              {canManageUsersFully ? (
+                <th
+                  scope="col"
+                  style={{ width: STICKY_CHECKBOX_COL_PX, minWidth: STICKY_CHECKBOX_COL_PX }}
+                  className="sticky left-0 z-30 border-r border-border/80 bg-zinc-50 px-0.5 py-1 align-middle font-medium shadow-[2px_0_4px_rgba(0,0,0,0.04)]"
+                >
+                  <input
+                    ref={selectAllCheckboxRef}
+                    type="checkbox"
+                    checked={allVisibleSelected}
+                    onChange={toggleSelectAllVisible}
+                    disabled={sorted.length === 0}
+                    className="h-4 w-4 accent-brand disabled:opacity-40"
+                    aria-label="Seleccionar todos los socios visibles en la tabla"
+                    title="Seleccionar o deseleccionar la vista actual"
+                  />
+                </th>
+              ) : null}
               {COLUMNS.map(({ key, label }) => {
                 const isStickySocio = key === "membershipId";
                 const isStickyName = key === "name";
@@ -1190,7 +1268,7 @@ export function AdminUsersClient({ users }: { users: SafeUser[] }) {
                 const thStyle: CSSProperties = {
                   width: widths[key],
                   ...(isStickySocio
-                    ? { left: STICKY_CHECKBOX_COL_PX }
+                    ? { left: stickyLeftBase }
                     : isStickyName
                       ? { left: stickyNameColLeft }
                       : {}),
@@ -1239,18 +1317,20 @@ export function AdminUsersClient({ users }: { users: SafeUser[] }) {
           <tbody>
             {sorted.map((u) => (
               <tr key={u.id} className="border-b border-border last:border-0">
-                <td
-                  style={{ width: STICKY_CHECKBOX_COL_PX, minWidth: STICKY_CHECKBOX_COL_PX }}
-                  className="sticky left-0 z-30 border-r border-border/80 bg-white px-0.5 py-1 align-top shadow-[2px_0_4px_rgba(0,0,0,0.04)]"
-                >
-                  <input
-                    type="checkbox"
-                    checked={selectedIds.has(u.id)}
-                    onChange={() => toggleSelectOne(u.id)}
-                    className="h-3.5 w-3.5 accent-brand"
-                    aria-label={`Seleccionar ${u.name}`}
-                  />
-                </td>
+                {canManageUsersFully ? (
+                  <td
+                    style={{ width: STICKY_CHECKBOX_COL_PX, minWidth: STICKY_CHECKBOX_COL_PX }}
+                    className="sticky left-0 z-30 border-r border-border/80 bg-white px-0.5 py-1 align-top shadow-[2px_0_4px_rgba(0,0,0,0.04)]"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.has(u.id)}
+                      onChange={() => toggleSelectOne(u.id)}
+                      className="h-3.5 w-3.5 accent-brand"
+                      aria-label={`Seleccionar ${u.name}`}
+                    />
+                  </td>
+                ) : null}
                 {COLUMNS.map(({ key }) => {
                   const isStickySocio = key === "membershipId";
                   const isStickyName = key === "name";
@@ -1263,7 +1343,7 @@ export function AdminUsersClient({ users }: { users: SafeUser[] }) {
                   const tdStyle: CSSProperties = {
                     width: widths[key],
                     ...(isStickySocio
-                      ? { left: STICKY_CHECKBOX_COL_PX }
+                      ? { left: stickyLeftBase }
                       : isStickyName
                         ? { left: stickyNameColLeft }
                         : {}),
@@ -1294,6 +1374,7 @@ export function AdminUsersClient({ users }: { users: SafeUser[] }) {
         .
       </p>
 
+      {canManageUsersFully ? (
       <QrScannerModal
         open={scannerOpen}
         onClose={() => {
@@ -1312,20 +1393,26 @@ export function AdminUsersClient({ users }: { users: SafeUser[] }) {
             : "Apunta la cámara al QR del carnet del socio"
         }
       />
+      ) : null}
 
       <UserQuickSheet
         user={scannedUser}
         busy={!!scannedUser && pendingId === scannedUser.id}
+        canManageMemberActions={canManageUsersFully}
         backdropPointerEventsNone={
           pendingConfirm !== null || authDeniedOpen
         }
         onClose={() => setScannedUserId(null)}
         onActivate={requestActivate}
         onDelivery={requestDelivery}
-        onOpenPermissions={(u) => {
-          setScannedUserId(null);
-          setPermissionsUser(u);
-        }}
+        onOpenPermissions={
+          canEditPermissionsUI
+            ? (u) => {
+                setScannedUserId(null);
+                setPermissionsUser(u);
+              }
+            : undefined
+        }
       />
 
       {permissionsUser ? (

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { QrScannerModal } from "@/components/admin/QrScannerModal";
 import { EnvelopeModal } from "@/components/roulette/consolation/EnvelopeModal";
 import { ScratchCard } from "@/components/roulette/consolation/ScratchCard";
+import { RedeemSuccessLivePanel } from "@/components/roulette/RedeemSuccessLivePanel";
 
 /**
  * Metadatos del rasca activo. Vienen de `/api/app/roulette/status`
@@ -54,9 +55,11 @@ export function ConsolationHost({
 }: Props) {
   const [redeemBusy, setRedeemBusy] = useState(false);
   const [redeemError, setRedeemError] = useState<string | null>(null);
-  const [redeemOk, setRedeemOk] = useState<{ label: string; validatorName: string | null } | null>(
-    null,
-  );
+  const [redeemOk, setRedeemOk] = useState<{
+    label: string;
+    validatorName: string | null;
+    redeemedAt: number;
+  } | null>(null);
 
   // Aviso nativo del navegador al cerrar pestaña mientras el rasca está vivo.
   // Mismo patrón que el premio de ruleta en `RouletteHost`.
@@ -111,6 +114,7 @@ export function ConsolationHost({
         setRedeemOk({
           label: data.rewardLabel ?? consolation.rewardLabel,
           validatorName: data.validatorName ?? null,
+          redeemedAt: Date.now(),
         });
         onViewChange("ok");
         await onRefresh();
@@ -190,57 +194,31 @@ export function ConsolationHost({
           role="dialog"
           aria-modal="true"
           aria-labelledby="consolation-ok-title"
-          onClick={() => onViewChange("closed")}
+          onClick={() => {
+            setRedeemOk(null);
+            onViewChange("closed");
+          }}
         >
           <div
             className="max-h-[92vh] w-full max-w-md overflow-y-auto rounded-t-3xl bg-white p-5 shadow-xl sm:rounded-3xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="space-y-5 text-center">
-              <div
-                className="redeem-ok-check-wrap mx-auto flex h-[4.25rem] w-[4.25rem] shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-700 shadow-[0_8px_28px_-6px_rgba(16,185,129,0.45)] ring-4 ring-emerald-200/90"
-                aria-hidden="true"
-              >
-                <svg
-                  viewBox="0 0 24 24"
-                  className="h-10 w-10"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth={2.4}
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  aria-hidden="true"
-                >
-                  <path className="redeem-ok-check-path" d="M5 13l4 4L19 7" />
-                </svg>
-              </div>
-              <div className="rounded-2xl border border-emerald-200/70 bg-gradient-to-b from-emerald-50/90 to-emerald-50/40 px-4 py-4 shadow-sm">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-emerald-800/75">
-                  Tu premio
-                </p>
-                <p className="mt-2 text-pretty text-xl font-bold leading-snug text-foreground sm:text-2xl">
-                  {redeemOk?.label ?? consolation?.rewardLabel ?? "tu regalo"}
-                </p>
-              </div>
-              <h2
-                id="consolation-ok-title"
-                className="text-base font-semibold text-foreground"
-              >
-                ¡Canje realizado!
-              </h2>
-              {redeemOk?.validatorName ? (
-                <p className="text-xs leading-relaxed text-muted">
-                  Validado por {redeemOk.validatorName}.
-                </p>
-              ) : null}
-              <button
-                type="button"
-                onClick={() => onViewChange("closed")}
-                className="inline-flex w-full items-center justify-center rounded-full bg-amber-500 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-amber-600"
-              >
-                Cerrar
-              </button>
-            </div>
+            {redeemOk ? (
+              <RedeemSuccessLivePanel
+                prizeLineTitle="Tu regalo"
+                prizeLabel={
+                  redeemOk.label ?? consolation?.rewardLabel ?? "tu regalo"
+                }
+                validatorName={redeemOk.validatorName}
+                redeemedAt={new Date(redeemOk.redeemedAt)}
+                titleId="consolation-ok-title"
+                autoCloseSeconds={6}
+                onClose={() => {
+                  setRedeemOk(null);
+                  onViewChange("closed");
+                }}
+              />
+            ) : null}
           </div>
         </div>
       ) : null}

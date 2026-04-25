@@ -1,12 +1,12 @@
 import * as XLSX from "xlsx";
 import { NextResponse } from "next/server";
-import { requireAdminForApi } from "@/lib/auth/admin";
+import { requireSociosActionsForApi } from "@/lib/auth/admin";
 import { listUsers } from "@/lib/repositories/users";
 import { SOCIO_EXCEL_COLUMNS, userRecordToExcelRow } from "@/lib/socios-excel";
 
 export async function GET() {
   try {
-    const auth = await requireAdminForApi();
+    const auth = await requireSociosActionsForApi();
     if (!auth.ok) return auth.response;
 
     const users = await listUsers();
