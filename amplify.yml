@@ -13,7 +13,9 @@ frontend:
         # con valores del build, sobrescribirían las credenciales del role.
         # Las NEXT_PUBLIC_* deben coincidir con el nombre completo (NEXT_PUBLIC_APP_URL,
         # NEXT_PUBLIC_STRIPE_*, etc.). Un patrón literal "NEXT_PUBLIC_=" no coincide nunca.
-        - env | grep -E '^(USERS_TABLE_NAME|POSTS_TABLE_NAME|PROGRAMACION_TABLE_NAME|PROGRAMACION_S3_BUCKET|ROULETTE_TABLE_NAME|STRIPE_SECRET_KEY|STRIPE_WEBHOOK_SECRET|SESSION_SECRET|SES_FROM_EMAIL|FECHA_LIMITE_COMPRA_CARNET)=' >> .env.production
+        # GUEST_COOKIE_ENABLED: middleware consume ?gt= y setea cookie httpOnly (ver lib/auth/guest-cookie.ts).
+        # RATE_LIMIT_BACKEND: "memory" (default) o "dynamo" para rate-limit persistente (lib/rate-limit.ts).
+        - env | grep -E '^(USERS_TABLE_NAME|POSTS_TABLE_NAME|PROGRAMACION_TABLE_NAME|PROGRAMACION_S3_BUCKET|ROULETTE_TABLE_NAME|RESERVATIONS_TABLE_NAME|RESERVATION_DOCS_S3_BUCKET|RESERVATIONS_STAFF_ALERT_EMAIL|STRIPE_SECRET_KEY|STRIPE_WEBHOOK_SECRET|SESSION_SECRET|SES_FROM_EMAIL|FECHA_LIMITE_COMPRA_CARNET|GUEST_COOKIE_ENABLED|RATE_LIMIT_BACKEND)=' >> .env.production
         - env | grep -E '^NEXT_PUBLIC_' >> .env.production
     build:
       commands:

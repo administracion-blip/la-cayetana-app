@@ -196,11 +196,14 @@ export function ConsolationHost({
             className="max-h-[92vh] w-full max-w-md overflow-y-auto rounded-t-3xl bg-white p-5 shadow-xl sm:rounded-3xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="space-y-4 text-center">
-              <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
+            <div className="space-y-5 text-center">
+              <div
+                className="redeem-ok-check-wrap mx-auto flex h-[4.25rem] w-[4.25rem] shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-700 shadow-[0_8px_28px_-6px_rgba(16,185,129,0.45)] ring-4 ring-emerald-200/90"
+                aria-hidden="true"
+              >
                 <svg
                   viewBox="0 0 24 24"
-                  className="h-8 w-8"
+                  className="h-10 w-10"
                   fill="none"
                   stroke="currentColor"
                   strokeWidth={2.4}
@@ -208,22 +211,28 @@ export function ConsolationHost({
                   strokeLinejoin="round"
                   aria-hidden="true"
                 >
-                  <path d="M5 13l4 4L19 7" />
+                  <path className="redeem-ok-check-path" d="M5 13l4 4L19 7" />
                 </svg>
+              </div>
+              <div className="rounded-2xl border border-emerald-200/70 bg-gradient-to-b from-emerald-50/90 to-emerald-50/40 px-4 py-4 shadow-sm">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-emerald-800/75">
+                  Tu premio
+                </p>
+                <p className="mt-2 text-pretty text-xl font-bold leading-snug text-foreground sm:text-2xl">
+                  {redeemOk?.label ?? consolation?.rewardLabel ?? "tu regalo"}
+                </p>
               </div>
               <h2
                 id="consolation-ok-title"
-                className="text-lg font-semibold text-foreground"
+                className="text-base font-semibold text-foreground"
               >
                 ¡Canje realizado!
               </h2>
-              <p className="text-sm text-muted">
-                Has canjeado:{" "}
-                <b>{redeemOk?.label ?? consolation?.rewardLabel ?? "tu regalo"}</b>.
-                {redeemOk?.validatorName
-                  ? ` Validado por ${redeemOk.validatorName}.`
-                  : ""}
-              </p>
+              {redeemOk?.validatorName ? (
+                <p className="text-xs leading-relaxed text-muted">
+                  Validado por {redeemOk.validatorName}.
+                </p>
+              ) : null}
               <button
                 type="button"
                 onClick={() => onViewChange("closed")}

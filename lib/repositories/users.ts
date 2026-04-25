@@ -812,6 +812,12 @@ export type AdminUserPatch = {
    * carnet en taquilla. `false` elimina el atributo.
    */
   canValidatePrizes?: boolean;
+  /** Módulo reservas: `false` elimina el atributo (equivale a desactivar). */
+  canManageReservations?: boolean;
+  canReplyReservationChats?: boolean;
+  canEditReservationConfig?: boolean;
+  canManageReservationDocuments?: boolean;
+  canWriteReservationNotes?: boolean;
 };
 
 /** Actualiza campos editables desde el panel admin / import Excel (por `id` de usuario). */
@@ -865,6 +871,29 @@ export async function updateUserFieldsById(
       removeAttrs.push("canValidatePrizes");
     }
   }
+  type ResPermKey =
+    | "canManageReservations"
+    | "canReplyReservationChats"
+    | "canEditReservationConfig"
+    | "canManageReservationDocuments"
+    | "canWriteReservationNotes";
+  const resPerm = (attr: ResPermKey) => {
+    const v = patch[attr];
+    if (v === undefined) return;
+    const nk = attr.replace(/[^a-zA-Z0-9]/g, "_");
+    if (v === true) {
+      names[`#p_${nk}`] = attr;
+      values[`:p_${nk}`] = true;
+      setParts.push(`#p_${nk} = :p_${nk}`);
+    } else {
+      removeAttrs.push(attr);
+    }
+  };
+  resPerm("canManageReservations");
+  resPerm("canReplyReservationChats");
+  resPerm("canEditReservationConfig");
+  resPerm("canManageReservationDocuments");
+  resPerm("canWriteReservationNotes");
 
   if (setParts.length === 0 && removeAttrs.length === 0) return;
 

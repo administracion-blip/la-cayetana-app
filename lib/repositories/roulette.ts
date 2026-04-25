@@ -9,6 +9,12 @@ import {
 
 type TransactItems = NonNullable<TransactWriteCommandInput["TransactItems"]>;
 import { randomInt, randomUUID } from "node:crypto";
+import {
+  addDays,
+  getZonedParts,
+  pad2,
+  zonedWallTimeToUtc,
+} from "@/lib/datetime";
 import { getDocClient } from "@/lib/dynamo";
 import { getEnv } from "@/lib/env";
 import {
@@ -88,6 +94,8 @@ export const DEFAULT_ROULETTE_CONFIG: Omit<
 > = {
   timezone: "Europe/Madrid",
   cycleStartHour: 13,
+  closedWindowStartHour: 4,
+  closedWindowEndHour: 13,
   spinsPerCycle: 2,
   redeemWindowSec: 15 * 60,
   targetWinRate: 0.3,
@@ -183,6 +191,18 @@ export class NoSpinsLeftError extends RouletteError {
   }
 }
 
+/**
+ * Se lanza cuando un socio intenta tirar fuera del horario operativo
+ * (entre `closedWindowStartHour` y `closedWindowEndHour`). El `opensAt`
+ * (ISO UTC) permite al cliente pintar "Vuelve a las 13:00".
+ */
+export class RouletteClosedError extends RouletteError {
+  constructor(public readonly opensAt: string | null) {
+    super("ROULETTE_CLOSED", "La ruleta está cerrada ahora mismo");
+    this.name = "RouletteClosedError";
+  }
+}
+
 export class AlreadyHasActivePrizeError extends RouletteError {
   constructor() {
     super(
@@ -252,6 +272,14 @@ export interface RouletteStatus {
    */
   activeConsolation: RouletteConsolationRecord | null;
   shadow: boolean;
+  /**
+   * Si es `true`, la ruleta está cerrada por horario (ventana nocturna de
+   * descanso). El cliente debe bloquear el botón de girar y mostrar
+   * `opensAt`. Siempre `false` para el usuario shadow.
+   */
+  closed: boolean;
+  /** Instante UTC (ISO) en el que la ruleta volverá a abrirse, o `null`. */
+  opensAt: string | null;
 }
 
 /**
@@ -292,77 +320,9 @@ export interface DiscardResult {
 }
 
 // ─── Helpers de zona horaria (ciclo 13:00 local → 12:59 siguiente) ────────
-
-/** Formateador con `hourCycle: "h23"` para evitar el `24:00` de algunos locales. */
-function getZonedParts(
-  date: Date,
-  timeZone: string,
-): { year: number; month: number; day: number; hour: number } {
-  const fmt = new Intl.DateTimeFormat("en-GB", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hourCycle: "h23",
-  });
-  const parts = fmt.formatToParts(date);
-  const map: Record<string, string> = {};
-  for (const p of parts) {
-    if (p.type !== "literal") map[p.type] = p.value;
-  }
-  return {
-    year: Number(map.year),
-    month: Number(map.month),
-    day: Number(map.day),
-    hour: Number(map.hour ?? "0"),
-  };
-}
-
-function pad2(n: number): string {
-  return String(n).padStart(2, "0");
-}
-
-/**
- * Convierte un "instante zonado" (yyyy-MM-dd HH:mm local en `timeZone`) al
- * instante UTC correspondiente. Maneja DST correctamente excepto en horas
- * ambiguas (la hora del cambio), que en España no coincide con las 13:00.
- */
-function zonedWallTimeToUtc(
-  year: number,
-  month: number,
-  day: number,
-  hour: number,
-  minute: number,
-  second: number,
-  ms: number,
-  timeZone: string,
-): Date {
-  const asIfUtc = Date.UTC(year, month - 1, day, hour, minute, second, ms);
-  const parts = getZonedParts(new Date(asIfUtc), timeZone);
-  const reconstructed = Date.UTC(
-    parts.year,
-    parts.month - 1,
-    parts.day,
-    parts.hour,
-    minute,
-    second,
-    ms,
-  );
-  const offset = reconstructed - asIfUtc;
-  return new Date(asIfUtc - offset);
-}
-
-function addDays(dateStr: string, delta: number): string {
-  const [y, m, d] = dateStr.split("-").map(Number);
-  const t = Date.UTC(y, m - 1, d);
-  const shifted = new Date(t + delta * 24 * 60 * 60 * 1000);
-  return `${shifted.getUTCFullYear()}-${pad2(shifted.getUTCMonth() + 1)}-${pad2(
-    shifted.getUTCDate(),
-  )}`;
-}
+// Los helpers genéricos (`getZonedParts`, `zonedWallTimeToUtc`, `addDays`,
+// `pad2`) viven en `lib/datetime.ts` para que otros módulos (p. ej.
+// Reservas) los reutilicen sin depender del repo de ruleta.
 
 /**
  * Devuelve el ciclo activo para `now`. Si la hora local es menor que
@@ -400,6 +360,54 @@ export function getActiveCycleId(
     startsAt: startsAtDate.toISOString(),
     endsAt: endsAtDate.toISOString(),
   };
+}
+
+/**
+ * Indica si la ruleta está **cerrada** en `now` según la ventana configurada.
+ * La jornada operativa va de `closedWindowEndHour` (apertura, típicamente 13)
+ * hasta `closedWindowStartHour` (cierre, típicamente 4 del día siguiente).
+ * Entre `closedWindowStartHour` y `closedWindowEndHour` (hora local) no se
+ * permite iniciar tiradas.
+ *
+ * Si ambas horas coinciden (`start === end`) se considera siempre abierta
+ * (ventana vacía), lo que sirve como modo "sin restricción horaria".
+ *
+ * Además devuelve `opensAt`: el instante UTC (ISO) en el que la ruleta
+ * volverá a estar abierta (`closedWindowEndHour` del día local
+ * correspondiente). Solo es significativo cuando `closed === true`.
+ */
+export interface RouletteClosedWindowStatus {
+  closed: boolean;
+  opensAt: string | null;
+}
+
+export function isRouletteClosed(
+  now: Date,
+  config: Pick<
+    RouletteConfigRecord,
+    "timezone" | "closedWindowStartHour" | "closedWindowEndHour"
+  >,
+): RouletteClosedWindowStatus {
+  const { timezone, closedWindowStartHour: s, closedWindowEndHour: e } = config;
+  if (s === e) return { closed: false, opensAt: null };
+  const local = getZonedParts(now, timezone);
+  const closed =
+    s <= e
+      ? local.hour >= s && local.hour < e
+      : local.hour >= s || local.hour < e;
+  if (!closed) return { closed: false, opensAt: null };
+  // Próxima hora de apertura en local: si la hora actual ya pasó de `e`
+  // (solo posible cuando s > e), abrimos al día siguiente.
+  const openDay =
+    s <= e || local.hour < e
+      ? `${local.year}-${pad2(local.month)}-${pad2(local.day)}`
+      : addDays(
+          `${local.year}-${pad2(local.month)}-${pad2(local.day)}`,
+          1,
+        );
+  const [oy, om, od] = openDay.split("-").map(Number);
+  const opensAtDate = zonedWallTimeToUtc(oy, om, od, e, 0, 0, 0, timezone);
+  return { closed: true, opensAt: opensAtDate.toISOString() };
 }
 
 // ─── CONFIG: read / init / update ─────────────────────────────────────────
@@ -500,6 +508,8 @@ export async function updateConfig(input: {
     Pick<
       RouletteConfigRecord,
       | "cycleStartHour"
+      | "closedWindowStartHour"
+      | "closedWindowEndHour"
       | "spinsPerCycle"
       | "redeemWindowSec"
       | "targetWinRate"
@@ -518,7 +528,28 @@ export async function updateConfig(input: {
     ...current,
     ...(input.patch.timezone ? { timezone: input.patch.timezone } : {}),
     ...(typeof input.patch.cycleStartHour === "number"
-      ? { cycleStartHour: Math.floor(input.patch.cycleStartHour) }
+      ? {
+          cycleStartHour: Math.min(
+            23,
+            Math.max(0, Math.floor(input.patch.cycleStartHour)),
+          ),
+        }
+      : {}),
+    ...(typeof input.patch.closedWindowStartHour === "number"
+      ? {
+          closedWindowStartHour: Math.min(
+            23,
+            Math.max(0, Math.floor(input.patch.closedWindowStartHour)),
+          ),
+        }
+      : {}),
+    ...(typeof input.patch.closedWindowEndHour === "number"
+      ? {
+          closedWindowEndHour: Math.min(
+            23,
+            Math.max(0, Math.floor(input.patch.closedWindowEndHour)),
+          ),
+        }
       : {}),
     ...(typeof input.patch.spinsPerCycle === "number"
       ? { spinsPerCycle: Math.max(1, Math.floor(input.patch.spinsPerCycle)) }
@@ -1036,6 +1067,8 @@ export async function getStatusForUser(
       activePrize,
       activeConsolation: null,
       shadow: true,
+      closed: false,
+      opensAt: null,
     };
   }
 
@@ -1055,6 +1088,7 @@ export async function getStatusForUser(
   const userCycle = await getUserCycle(cycle.cycleId, userId);
   const spinsUsed = userCycle?.spinsUsed ?? 0;
   const spinsRemaining = Math.max(0, config.spinsPerCycle - spinsUsed);
+  const closedNow = isRouletteClosed(new Date(), config);
   const disabled = spinsRemaining === 0 && activePrize === null;
   return {
     cycleId: cycle.cycleId,
@@ -1064,6 +1098,8 @@ export async function getStatusForUser(
     activePrize,
     activeConsolation,
     shadow: false,
+    closed: closedNow.closed,
+    opensAt: closedNow.opensAt,
   };
 }
 
@@ -1179,6 +1215,14 @@ export async function runSpin(input: {
 
   if (isShadow) {
     return runShadowSpin({ user, config });
+  }
+
+  // Gate horario: fuera de la ventana operativa bloqueamos antes de tocar
+  // contadores ni stock. Se calcula con el mismo `now` que `cycle` para que
+  // no haya ventanas de carrera (ej.: girar exactamente a las 04:00:00).
+  const closedNow = isRouletteClosed(new Date(), config);
+  if (closedNow.closed) {
+    throw new RouletteClosedError(closedNow.opensAt);
   }
 
   return runRealSpin({ user, config, cycle });

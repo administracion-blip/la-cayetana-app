@@ -1,1 +1,1 @@
-z
+En el tablero de reservas, si el campo contiene un prepago adjunto, deberia marca debajo del campo completado, el importe del 

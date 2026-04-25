@@ -11,6 +11,8 @@ type Props = {
   onClose: () => void;
   onActivate: (user: SafeUser) => void;
   onDelivery: (user: SafeUser, action: "deliver" | "undo") => void;
+  /** Abre el modal de permisos (admin) y normalmente se cierra la ficha. */
+  onOpenPermissions?: (user: SafeUser) => void;
   /**
    * Si es true, el backdrop no recibe punteros (p. ej. con un diálogo de
    * confirmación encima, evita cierres fantasma al confirmar).
@@ -115,6 +117,7 @@ export function UserQuickSheet({
   onClose,
   onActivate,
   onDelivery,
+  onOpenPermissions,
   backdropPointerEventsNone = false,
 }: Props) {
   if (!user) return null;
@@ -168,6 +171,18 @@ export function UserQuickSheet({
         </header>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+          {onOpenPermissions ? (
+            <div className="mb-3">
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => onOpenPermissions(user)}
+                className="w-full rounded-xl border border-border bg-white py-2.5 text-sm font-medium text-foreground hover:bg-zinc-50 disabled:opacity-50"
+              >
+                Permisos (admin, validador, reservas…)
+              </button>
+            </div>
+          ) : null}
           <dl className="grid grid-cols-2 gap-x-3 gap-y-2.5 sm:grid-cols-3">
             <Field label="Teléfono">{user.phone ?? "—"}</Field>
             <Field label="Sexo">

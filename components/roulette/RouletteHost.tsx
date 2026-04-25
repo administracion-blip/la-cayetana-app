@@ -19,6 +19,14 @@ type RouletteStatusDto = {
   spinsPerCycle: number;
   disabled: boolean;
   shadow: boolean;
+  /**
+   * `true` si la ruleta está fuera de la ventana horaria operativa
+   * (normalmente 04:00 → 13:00 hora local). El cliente bloquea el botón
+   * y muestra `opensAt`.
+   */
+  closed: boolean;
+  /** Instante UTC (ISO) en el que la ruleta volverá a abrir, si procede. */
+  opensAt: string | null;
   activePrize: {
     prizeId: string;
     prizeType: PrizeType;
@@ -35,6 +43,25 @@ type RouletteStatusDto = {
     expiresAt: string;
   } | null;
 };
+
+/**
+ * Formatea `opensAt` (ISO UTC) en la hora local del navegador (ej. "13:00").
+ * Si falla cualquier parseo devolvemos `null` para que el caller decida.
+ */
+function formatOpensAt(opensAt: string | null): string | null {
+  if (!opensAt) return null;
+  const t = new Date(opensAt);
+  if (Number.isNaN(t.getTime())) return null;
+  try {
+    return new Intl.DateTimeFormat("es-ES", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    }).format(t);
+  } catch {
+    return null;
+  }
+}
 
 type SpinResultDto = {
   outcome: "win" | "lose";
@@ -210,19 +237,55 @@ function RouletteButton({
   onClick: () => void;
 }) {
   const hasConsolation = !!status?.activeConsolation;
-  // Si hay un rasca pendiente tratamos el botón como activo (no deshabilitado),
-  // aunque `status.disabled` sea true por haber agotado tiradas.
-  const disabled = !status || (status.disabled && !hasConsolation);
+  const hasActivePrize = !!status?.activePrize;
+  const isClosed = !!status?.closed;
+  const opensAtLabel = formatOpensAt(status?.opensAt ?? null);
+  // Si hay un rasca o premio pendiente tratamos el botón como activo aunque
+  // `status.disabled` sea true por haber agotado tiradas o por ventana
+  // horaria cerrada (esos premios deben poderse canjear de madrugada).
+  const disabled =
+    !status ||
+    ((status.disabled || isClosed) && !hasConsolation && !hasActivePrize);
+
+  const titleLabel = status?.activePrize
+    ? "Ruleta de la Suerte"
+    : hasConsolation
+      ? "Regalo Seguro"
+      : "Juega a la Ruleta";
+
+  const detailHint = status?.activePrize
+    ? "Tienes un premio sin canjear"
+    : hasConsolation
+      ? "Tienes un regalo pendiente"
+      : isClosed
+        ? opensAtLabel
+          ? `Ruleta cerrada. Vuelve a las ${opensAtLabel}`
+          : "Ruleta cerrada. Vuelve al abrir la caseta"
+        : disabled && status
+          ? "Has gastado tus tiradas. Vuelve tras la próxima apertura"
+          : "";
+
+  const spinsHint =
+    status && status.spinsRemaining !== null
+      ? `${status.spinsRemaining} de ${status.spinsPerCycle} tiradas`
+      : status && status.spinsRemaining === null
+        ? "Tiradas ilimitadas"
+        : "";
+
+  const rouletteAriaLabel = [titleLabel, detailHint, spinsHint]
+    .filter(Boolean)
+    .join(". ");
+
   return (
     <div
-      className={`relative w-full overflow-hidden rounded-2xl ${
-        disabled ? "" : "shadow-[0_0_28px_rgba(250,204,21,0.4)]"
+      className={`relative min-w-0 w-full overflow-hidden rounded-2xl ${
+        disabled ? "" : "shadow-[0_0_26px_rgba(251,191,36,0.38)]"
       }`}
     >
-      {/* Gradiente cónico a pantalla completa; el botón deja ~3px de hueco (margen) donde se ve el “láser” */}
+      {/* Brillo diagonal que cruza la tarjeta (sustituye al láser cónico) */}
       {!disabled && (
         <div
-          className="pointer-events-none absolute inset-0 z-0 animate-[spin_2.5s_linear_infinite] bg-[conic-gradient(from_0deg,transparent_0deg,transparent_240deg,rgba(253,224,71,0.85)_275deg,rgba(250,204,21,1)_295deg,rgba(254,249,195,1)_310deg,rgba(250,204,21,0.75)_325deg,transparent_350deg)] motion-reduce:animate-none"
+          className="roulette-feed-shimmer z-0 rounded-2xl motion-reduce:!hidden"
           aria-hidden
         />
       )}
@@ -230,52 +293,35 @@ function RouletteButton({
         type="button"
         onClick={onClick}
         disabled={disabled}
-        className={`group relative z-10 box-border flex items-center gap-3 border px-4 py-3 text-left shadow-sm transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-500 ${
+        className={`group relative z-10 box-border flex min-w-0 items-center gap-2 border px-3 py-2.5 text-left shadow-sm transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-500 sm:gap-3 sm:px-4 sm:py-3 ${
           disabled
             ? "w-full cursor-not-allowed rounded-2xl border-zinc-200 bg-zinc-100 text-zinc-500"
             : "m-[4px] w-[calc(100%-8px)] max-w-[calc(100%-8px)] rounded-[calc(1rem-4px)] border-amber-200/80 bg-amber-100 text-amber-900 hover:bg-amber-200/90 active:scale-[0.99]"
         }`}
-        aria-label="Juega a la Ruleta"
+        aria-label={rouletteAriaLabel}
       >
+        <span className="flex min-w-0 flex-1 flex-col items-start gap-1">
+          <span className="text-sm font-semibold leading-tight sm:text-base">
+            {titleLabel}
+          </span>
+          <span
+            className={`inline-flex rounded-full px-2 py-0.5 text-[11px] sm:px-2.5 sm:py-0.5 sm:text-xs ${
+              disabled ? "bg-zinc-200" : "bg-white/60"
+            }`}
+          >
+            <CounterLabel status={status} />
+          </span>
+        </span>
         <span
-          className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full ${
+          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full sm:h-11 sm:w-11 ${
             disabled ? "bg-zinc-200" : "bg-amber-300/90 shadow-inner"
           }`}
         >
           <RouletteIcon
-            className={`h-6 w-6 ${
+            className={`h-5 w-5 sm:h-6 sm:w-6 ${
               disabled ? "text-zinc-500" : "text-amber-900"
-            } ${
-              disabled
-                ? ""
-                : "animate-[spin_6s_linear_infinite] motion-reduce:animate-none"
-            }`}
+            } ${disabled ? "" : "roulette-feed-icon-spin"}`}
           />
-        </span>
-        <span className="flex flex-1 flex-col">
-          <span className="text-[15px] font-semibold leading-tight">
-            {status?.activePrize
-              ? "Ruleta de la Suerte"
-              : hasConsolation
-                ? "Regalo Seguro"
-                : "Juega a la Ruleta"}
-          </span>
-          <span className="text-xs leading-tight opacity-80">
-            {status?.activePrize
-              ? "¡Tienes un premio sin canjear! Pulsa para canjearlo."
-              : hasConsolation
-                ? "Tienes un regalo pendiente. Pulsa para recogerlo."
-                : disabled
-                  ? "Has gastado tus tiradas. Vuelve tras la próxima apertura."
-                  : "Prueba suerte y gana premios en La Cayetana."}
-          </span>
-        </span>
-        <span
-          className={`shrink-0 rounded-full px-3 py-1 text-sm ${
-            disabled ? "bg-zinc-200" : "bg-white/60"
-          }`}
-        >
-          <CounterLabel status={status} />
         </span>
       </button>
     </div>
@@ -765,6 +811,27 @@ export function RouletteHost() {
     void loadStatus();
   }, [loadStatus]);
 
+  // Auto-refresh cuando la ruleta esté cerrada por horario: al cruzar
+  // `opensAt` volvemos a pedir el status para que el botón se desbloquee
+  // solo, sin que el usuario tenga que recargar. Margen de 2s para evitar
+  // ganar la carrera al reloj del servidor.
+  useEffect(() => {
+    if (!status?.closed || !status.opensAt) return;
+    const ms = new Date(status.opensAt).getTime() - Date.now() + 2000;
+    if (!Number.isFinite(ms) || ms <= 0) {
+      // Ya habíamos pasado la hora de apertura cuando recibimos el status.
+      // Sincronización con un sistema externo (nuestra API HTTP): la regla
+      // `react-hooks/set-state-in-effect` es un falso positivo aquí.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      void loadStatus();
+      return;
+    }
+    const id = window.setTimeout(() => {
+      void loadStatus();
+    }, ms);
+    return () => window.clearTimeout(id);
+  }, [status?.closed, status?.opensAt, loadStatus]);
+
   const closeAll = useCallback(() => {
     setView("closed");
     setSpinError(null);
@@ -790,6 +857,10 @@ export function RouletteHost() {
       return;
     }
     if (status.disabled) return;
+    // Fuera de la ventana operativa (p. ej. 04:00–13:00) no se abre el
+    // modal de tirada. El botón ya debería estar deshabilitado, pero
+    // blindamos también esta vía por si llega un status rancio de caché.
+    if (status.closed) return;
     setView("welcome");
   }, [status]);
 
@@ -1044,10 +1115,20 @@ export function RouletteHost() {
           <button
             type="button"
             onClick={handleSpin}
-            disabled={spinning || (status?.disabled ?? false)}
+            disabled={
+              spinning ||
+              (status?.disabled ?? false) ||
+              (status?.closed ?? false)
+            }
             className="roulette-girar-btn inline-flex w-full items-center justify-center rounded-full border border-[#fde68a]/90 px-4 py-3 text-sm font-semibold text-zinc-900 shadow-sm transition-opacity disabled:opacity-60"
           >
-            {spinning ? "Girando…" : "Girar"}
+            {spinning
+              ? "Girando…"
+              : status?.closed
+                ? formatOpensAt(status.opensAt)
+                  ? `Abre a las ${formatOpensAt(status.opensAt)}`
+                  : "Ruleta cerrada"
+                : "Girar"}
           </button>
         </div>
       </Modal>
@@ -1231,11 +1312,14 @@ export function RouletteHost() {
         onClose={closeAll}
         labelledBy="roulette-redeem-ok-title"
       >
-        <div className="space-y-4 text-center">
-          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
+        <div className="space-y-5 text-center">
+          <div
+            className="redeem-ok-check-wrap mx-auto flex h-[4.25rem] w-[4.25rem] shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-700 shadow-[0_8px_28px_-6px_rgba(16,185,129,0.45)] ring-4 ring-emerald-200/90"
+            aria-hidden="true"
+          >
             <svg
               viewBox="0 0 24 24"
-              className="h-8 w-8"
+              className="h-10 w-10"
               fill="none"
               stroke="currentColor"
               strokeWidth={2.4}
@@ -1243,21 +1327,28 @@ export function RouletteHost() {
               strokeLinejoin="round"
               aria-hidden="true"
             >
-              <path d="M5 13l4 4L19 7" />
+              <path className="redeem-ok-check-path" d="M5 13l4 4L19 7" />
             </svg>
+          </div>
+          <div className="rounded-2xl border border-emerald-200/70 bg-gradient-to-b from-emerald-50/90 to-emerald-50/40 px-4 py-4 shadow-sm">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-emerald-800/75">
+              Tu premio
+            </p>
+            <p className="mt-2 text-pretty text-xl font-bold leading-snug text-foreground sm:text-2xl">
+              {redeemOkMsg?.label ?? "tu premio"}
+            </p>
           </div>
           <h2
             id="roulette-redeem-ok-title"
-            className="text-lg font-semibold text-foreground"
+            className="text-base font-semibold text-foreground"
           >
             ¡Canje realizado!
           </h2>
-          <p className="text-sm text-muted">
-            Has canjeado: <b>{redeemOkMsg?.label ?? "tu premio"}</b>.
-            {redeemOkMsg?.validatorName
-              ? ` Validado por ${redeemOkMsg.validatorName}.`
-              : ""}
-          </p>
+          {redeemOkMsg?.validatorName ? (
+            <p className="text-xs leading-relaxed text-muted">
+              Validado por {redeemOkMsg.validatorName}.
+            </p>
+          ) : null}
           <button
             type="button"
             onClick={closeAll}

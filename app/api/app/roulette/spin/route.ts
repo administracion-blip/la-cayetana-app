@@ -4,6 +4,7 @@ import {
   AlreadyHasActivePrizeError,
   NoSpinsLeftError,
   PRIZE_LABEL,
+  RouletteClosedError,
   RouletteError,
   runSpin,
 } from "@/lib/repositories/roulette";
@@ -44,6 +45,12 @@ export async function POST() {
     if (err instanceof AlreadyHasActivePrizeError) {
       return NextResponse.json(
         { error: err.message, code: err.code },
+        { status: 409 },
+      );
+    }
+    if (err instanceof RouletteClosedError) {
+      return NextResponse.json(
+        { error: err.message, code: err.code, opensAt: err.opensAt },
         { status: 409 },
       );
     }

@@ -82,6 +82,63 @@ function preflightCheck(): string | null {
   return null;
 }
 
+/**
+ * Consulta el estado del permiso de cámara. La Permissions API no está
+ * soportada en Safari iOS ni en algunos navegadores antiguos; si falla,
+ * devolvemos `"unknown"` y tratamos como "pendiente de conceder" (se
+ * mostrará el CTA "Permitir cámara" para forzar el gesto de usuario).
+ */
+type CameraPermission = "granted" | "denied" | "prompt" | "unknown";
+
+async function queryCameraPermission(): Promise<CameraPermission> {
+  if (typeof navigator === "undefined") return "unknown";
+  const perms = (navigator as Navigator & { permissions?: Permissions })
+    .permissions;
+  if (!perms || typeof perms.query !== "function") return "unknown";
+  try {
+    // `camera` no está tipado en todos los `lib.dom.d.ts`, pero sí existe
+    // en Chromium/Firefox. `as PermissionName` evita el warning de TS.
+    const status = await perms.query({
+      name: "camera" as PermissionName,
+    });
+    if (status.state === "granted") return "granted";
+    if (status.state === "denied") return "denied";
+    return "prompt";
+  } catch {
+    return "unknown";
+  }
+}
+
+/**
+ * Intenta obtener un stream mínimo para forzar el diálogo nativo de
+ * permiso. Tras resolver, libera el stream inmediatamente para que el
+ * componente `Scanner` pueda abrir su propia cámara sin conflictos.
+ */
+async function requestCameraAccess(): Promise<{
+  ok: boolean;
+  errorName?: string;
+  errorMessage?: string;
+}> {
+  if (typeof navigator === "undefined" || !navigator.mediaDevices) {
+    return { ok: false, errorName: "NotSupported" };
+  }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "environment" },
+      audio: false,
+    });
+    stream.getTracks().forEach((t) => t.stop());
+    return { ok: true };
+  } catch (err: unknown) {
+    const e = err as { name?: string; message?: string } | undefined;
+    return {
+      ok: false,
+      errorName: e?.name ?? "Unknown",
+      errorMessage: e?.message,
+    };
+  }
+}
+
 export function QrScannerModal({
   open,
   onClose,
@@ -91,16 +148,83 @@ export function QrScannerModal({
 }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [paused, setPaused] = useState(false);
+  const [permission, setPermission] = useState<CameraPermission>("unknown");
+  /**
+   * Blocked "duro": el usuario (o el SO) ha denegado el permiso y el
+   * navegador ya no volverá a mostrar el prompt sin pasar por ajustes.
+   * Se decide en base a `NotAllowedError` tras pulsar el CTA.
+   */
+  const [blocked, setBlocked] = useState(false);
+  const [requesting, setRequesting] = useState(false);
   const firedRef = useRef(false);
 
   useEffect(() => {
-    if (open) {
-      const preflight = preflightCheck();
+    if (!open) return;
+    const preflight = preflightCheck();
+    if (preflight) {
       setError(preflight);
       setPaused(false);
+      setPermission("unknown");
+      setBlocked(false);
       firedRef.current = false;
+      return;
     }
+    setError(null);
+    setPaused(false);
+    setBlocked(false);
+    firedRef.current = false;
+    // Consulta el permiso y, si ya está concedido, monta el scanner sin
+    // pedir nada; en cualquier otro caso, espera al gesto de usuario.
+    void queryCameraPermission().then((p) => setPermission(p));
   }, [open]);
+
+  const setErrorFromNative = useCallback(
+    (name: string | undefined, message: string | undefined) => {
+      if (name === "NotAllowedError" || name === "PermissionDeniedError") {
+        setError(
+          "Has denegado el permiso de cámara. Actívalo en los ajustes del navegador (candado junto a la URL) y vuelve a intentarlo.",
+        );
+        setBlocked(true);
+      } else if (name === "NotFoundError" || name === "DevicesNotFoundError") {
+        setError("No se ha encontrado ninguna cámara en este dispositivo.");
+      } else if (name === "NotReadableError") {
+        setError("No se puede acceder a la cámara. ¿Otra app la está usando?");
+      } else if (name === "OverconstrainedError") {
+        setError(
+          "La cámara trasera no cumple las restricciones. Intenta girar el móvil o reiniciar el navegador.",
+        );
+      } else if (
+        name === "SecurityError" ||
+        /secure|https|context/i.test(message ?? "")
+      ) {
+        setError(
+          "La cámara solo funciona sobre HTTPS. Abre esta app por una URL https://…",
+        );
+      } else {
+        setError(
+          `No se ha podido iniciar la cámara${name ? ` (${name})` : ""}${
+            message ? `: ${message}` : "."
+          }`,
+        );
+      }
+    },
+    [],
+  );
+
+  const handleGrantClick = useCallback(async () => {
+    if (requesting) return;
+    setRequesting(true);
+    setError(null);
+    const res = await requestCameraAccess();
+    setRequesting(false);
+    if (res.ok) {
+      setPermission("granted");
+      setBlocked(false);
+      return;
+    }
+    setPermission("denied");
+    setErrorFromNative(res.errorName, res.errorMessage);
+  }, [requesting, setErrorFromNative]);
 
   const handleScan = useCallback(
     (codes: IDetectedBarcode[]) => {
@@ -116,38 +240,14 @@ export function QrScannerModal({
     [onResult],
   );
 
-  const handleError = useCallback((err: unknown) => {
-    console.error("[QrScannerModal] error cámara", err);
-    const e = err as { name?: string; message?: string } | undefined;
-    const name = e?.name;
-    const message = e?.message ?? "";
-    if (name === "NotAllowedError" || name === "PermissionDeniedError") {
-      setError(
-        "Has denegado el permiso de cámara. Actívalo en los ajustes del navegador y vuelve a intentarlo.",
-      );
-    } else if (name === "NotFoundError" || name === "DevicesNotFoundError") {
-      setError("No se ha encontrado ninguna cámara en este dispositivo.");
-    } else if (name === "NotReadableError") {
-      setError("No se puede acceder a la cámara. ¿Otra app la está usando?");
-    } else if (name === "OverconstrainedError") {
-      setError(
-        "La cámara trasera no cumple las restricciones. Intenta girar el móvil o reiniciar el navegador.",
-      );
-    } else if (
-      name === "SecurityError" ||
-      /secure|https|context/i.test(message)
-    ) {
-      setError(
-        "La cámara solo funciona sobre HTTPS. Abre esta app por una URL https://…",
-      );
-    } else {
-      setError(
-        `No se ha podido iniciar la cámara${name ? ` (${name})` : ""}${
-          message ? `: ${message}` : "."
-        }`,
-      );
-    }
-  }, []);
+  const handleError = useCallback(
+    (err: unknown) => {
+      console.error("[QrScannerModal] error cámara", err);
+      const e = err as { name?: string; message?: string } | undefined;
+      setErrorFromNative(e?.name, e?.message);
+    },
+    [setErrorFromNative],
+  );
 
   if (!open) return null;
 
@@ -173,12 +273,65 @@ export function QrScannerModal({
         {error ? (
           <div className="flex h-full flex-col items-center justify-center gap-4 px-6 text-center text-white">
             <p className="max-w-sm text-[15px] leading-relaxed">{error}</p>
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              {blocked ? (
+                <button
+                  type="button"
+                  onClick={handleGrantClick}
+                  disabled={requesting}
+                  className="rounded-full bg-white px-4 py-2 text-sm font-medium text-black disabled:opacity-60"
+                >
+                  {requesting ? "Solicitando…" : "Reintentar"}
+                </button>
+              ) : null}
+              <button
+                type="button"
+                onClick={onClose}
+                className="rounded-full border border-white/40 bg-white/10 px-4 py-2 text-sm font-medium text-white hover:bg-white/20"
+              >
+                Cerrar
+              </button>
+            </div>
+            {blocked ? (
+              <p className="max-w-sm text-xs leading-relaxed text-white/70">
+                Si sigue sin funcionar, pulsa el candado junto a la URL →
+                «Permisos del sitio» → Cámara → «Permitir», y recarga la
+                página.
+              </p>
+            ) : null}
+          </div>
+        ) : permission !== "granted" ? (
+          <div className="flex h-full flex-col items-center justify-center gap-5 px-6 text-center text-white">
+            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-white/10">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="h-8 w-8"
+                aria-hidden="true"
+              >
+                <path d="M23 7l-7 5 7 5V7z" />
+                <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+              </svg>
+            </div>
+            <div className="space-y-2">
+              <h3 className="text-lg font-semibold">Activa la cámara</h3>
+              <p className="max-w-sm text-[15px] leading-relaxed text-white/80">
+                Para escanear el QR necesitamos acceso a la cámara. Pulsa
+                «Permitir cámara» y acepta el aviso del navegador.
+              </p>
+            </div>
             <button
               type="button"
-              onClick={onClose}
-              className="rounded-full bg-white px-4 py-2 text-sm font-medium text-black"
+              onClick={handleGrantClick}
+              disabled={requesting}
+              className="rounded-full bg-white px-5 py-2.5 text-sm font-semibold text-black disabled:opacity-60"
             >
-              Cerrar
+              {requesting ? "Solicitando…" : "Permitir cámara"}
             </button>
           </div>
         ) : (
@@ -216,7 +369,7 @@ export function QrScannerModal({
           />
         )}
 
-        {!error ? (
+        {!error && permission === "granted" ? (
           <div className="pointer-events-none absolute inset-x-0 bottom-6 flex justify-center px-6">
             <p className="rounded-full bg-black/60 px-4 py-2 text-xs text-white shadow">
               {hint}

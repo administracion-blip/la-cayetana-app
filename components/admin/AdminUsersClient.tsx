@@ -8,12 +8,14 @@ import {
   useState,
   useTransition,
 } from "react";
+import type { CSSProperties } from "react";
 import { QrScanIcon } from "@/components/icons/QrScanIcon";
 import type { UserRecord } from "@/types/models";
 import { AdminAuthDeniedDialog } from "./AdminAuthDeniedDialog";
 import { AdminConfirmDialog } from "./AdminConfirmDialog";
 import { QrScannerModal } from "./QrScannerModal";
 import { ScanNoMatchDialog } from "./ScanNoMatchDialog";
+import { UserPermissionsModal } from "./UserPermissionsModal";
 import { UserQuickSheet } from "./UserQuickSheet";
 
 /**
@@ -67,7 +69,8 @@ type SortKey =
   | "deliveryStatus"
   | "isAdmin"
   | "canValidatePrizes"
-  | "createdAt";
+  | "createdAt"
+  | "permissions";
 
 const COLUMNS: { key: SortKey; label: string }[] = [
   { key: "membershipId", label: "Socio" },
@@ -82,21 +85,23 @@ const COLUMNS: { key: SortKey; label: string }[] = [
   { key: "isAdmin", label: "Admin" },
   { key: "canValidatePrizes", label: "Validador" },
   { key: "createdAt", label: "Alta" },
+  { key: "permissions", label: "Permisos" },
 ];
 
 const DEFAULT_WIDTHS: Record<SortKey, number> = {
-  membershipId: 78,
-  name: 140,
-  email: 180,
-  phone: 96,
-  sex: 90,
-  birthYear: 64,
-  status: 84,
-  paidAmount: 76,
-  deliveryStatus: 160,
-  isAdmin: 56,
-  canValidatePrizes: 112,
-  createdAt: 124,
+  membershipId: 72,
+  name: 128,
+  email: 156,
+  phone: 88,
+  sex: 80,
+  birthYear: 58,
+  status: 78,
+  paidAmount: 70,
+  deliveryStatus: 138,
+  isAdmin: 52,
+  canValidatePrizes: 100,
+  createdAt: 108,
+  permissions: 80,
 };
 
 const SEX_LABEL: Record<string, string> = {
@@ -106,6 +111,9 @@ const SEX_LABEL: Record<string, string> = {
 };
 
 const MIN_COL = 56;
+
+/** Ancho columna checkbox (w-9 + padding); base para `left` de Socio / Nombre sticky. */
+const STICKY_CHECKBOX_COL_PX = 40;
 
 const EUR_FORMAT = new Intl.NumberFormat("es-ES", {
   style: "currency",
@@ -120,6 +128,18 @@ function formatEuros(cents: number | undefined | null): string {
 function deliveryRank(u: SafeUser): number {
   if (u.status !== "active") return 2;
   return u.deliveryStatus === "delivered" ? 1 : 0;
+}
+
+function permissionScore(u: SafeUser): number {
+  let n = 0;
+  if (u.isAdmin) n++;
+  if (u.canValidatePrizes) n++;
+  if (u.canManageReservations) n++;
+  if (u.canReplyReservationChats) n++;
+  if (u.canEditReservationConfig) n++;
+  if (u.canManageReservationDocuments) n++;
+  if (u.canWriteReservationNotes) n++;
+  return n;
 }
 
 function compareUsers(
@@ -166,6 +186,8 @@ function compareUsers(
       return (
         (new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()) * mul
       );
+    case "permissions":
+      return (permissionScore(a) - permissionScore(b)) * mul;
     default:
       return 0;
   }
@@ -198,12 +220,15 @@ export function AdminUsersClient({ users }: { users: SafeUser[] }) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(
     () => new Set(),
   );
+  const [permissionsUser, setPermissionsUser] = useState<SafeUser | null>(null);
   const selectAllCheckboxRef = useRef<HTMLInputElement>(null);
 
   const sortColumnLabel = useMemo(
     () => COLUMNS.find((c) => c.key === sortKey)?.label ?? sortKey,
     [sortKey],
   );
+
+  const stickyNameColLeft = STICKY_CHECKBOX_COL_PX + widths.membershipId;
 
   // La ficha se deriva de `rows` para reflejar actualizaciones (p.ej. tras
   // activar o marcar entregado la ficha muestra el nuevo estado sin cerrarse).
@@ -516,47 +541,6 @@ export function AdminUsersClient({ users }: { users: SafeUser[] }) {
     [],
   );
 
-  const runValidatorToggle = useCallback(
-    async (user: SafeUser, next: boolean): Promise<boolean> => {
-      setError(null);
-      setPendingId(user.id);
-      try {
-        const res = await fetch(
-          `/api/admin/users/${encodeURIComponent(user.id)}/validator`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ canValidatePrizes: next }),
-          },
-        );
-        const data = (await res.json().catch(() => null)) as
-          | { ok?: boolean; error?: string }
-          | null;
-        if (!res.ok || !data?.ok) {
-          setError(
-            data?.error ?? "No se pudo actualizar el estado de validador",
-          );
-          return false;
-        }
-        startTransition(() => {
-          setRows((prev) =>
-            prev.map((u) =>
-              u.id === user.id ? { ...u, canValidatePrizes: next } : u,
-            ),
-          );
-        });
-        return true;
-      } catch (e) {
-        console.error(e);
-        setError("Error de red al actualizar el estado de validador");
-        return false;
-      } finally {
-        setPendingId(null);
-      }
-    },
-    [],
-  );
-
   const runBulkDeliver = useCallback(
     async (users: SafeUser[]) => {
       let ok = 0;
@@ -639,14 +623,37 @@ export function AdminUsersClient({ users }: { users: SafeUser[] }) {
     switch (key) {
       case "membershipId":
         return (
-          <span className="font-mono text-xs">{u.membershipId ?? "—"}</span>
+          <span className="font-mono text-[10px] leading-tight">
+            {u.membershipId ?? "—"}
+          </span>
         );
       case "name":
-        return u.name;
+        return (
+          <span
+            className="block min-w-0 max-w-full truncate"
+            title={u.name}
+          >
+            {u.name}
+          </span>
+        );
       case "email":
-        return u.email;
+        return (
+          <span
+            className="block min-w-0 max-w-full truncate text-muted"
+            title={u.email}
+          >
+            {u.email}
+          </span>
+        );
       case "phone":
-        return <span className="text-muted">{u.phone ?? "—"}</span>;
+        return (
+          <span
+            className="block min-w-0 max-w-full truncate text-muted"
+            title={u.phone ?? undefined}
+          >
+            {u.phone ?? "—"}
+          </span>
+        );
       case "sex":
         return (
           <span className="text-muted">
@@ -655,7 +662,7 @@ export function AdminUsersClient({ users }: { users: SafeUser[] }) {
         );
       case "birthYear":
         return (
-          <span className="font-mono text-xs text-muted">
+          <span className="font-mono text-[10px] leading-tight text-muted">
             {u.birthYear ?? "—"}
           </span>
         );
@@ -663,15 +670,15 @@ export function AdminUsersClient({ users }: { users: SafeUser[] }) {
         if (u.status === "pending_payment") {
           const busy = pendingId === u.id;
           return (
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700 ring-1 ring-inset ring-amber-200">
+            <div className="flex flex-wrap items-center gap-1">
+              <span className="inline-flex items-center rounded-full bg-amber-50 px-1.5 py-0 text-[10px] font-medium leading-tight text-amber-700 ring-1 ring-inset ring-amber-200">
                 Pendiente pago
               </span>
               <button
                 type="button"
                 disabled={busy}
                 onClick={() => requestActivate(u)}
-                className="rounded-md bg-brand px-2 py-0.5 text-xs font-medium text-white hover:bg-brand-hover disabled:opacity-50"
+                className="rounded bg-brand px-1.5 py-0.5 text-[10px] font-medium leading-tight text-white hover:bg-brand-hover disabled:opacity-50"
                 title="Confirmar pago y activar socio"
               >
                 {busy ? "…" : "Activar"}
@@ -682,15 +689,15 @@ export function AdminUsersClient({ users }: { users: SafeUser[] }) {
         if (u.status === "inactive") {
           const busy = pendingId === u.id;
           return (
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="inline-flex items-center rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-700 ring-1 ring-inset ring-zinc-200">
+            <div className="flex flex-wrap items-center gap-1">
+              <span className="inline-flex items-center rounded-full bg-zinc-100 px-1.5 py-0 text-[10px] font-medium leading-tight text-zinc-700 ring-1 ring-inset ring-zinc-200">
                 Inactivo
               </span>
               <button
                 type="button"
                 disabled={busy}
                 onClick={() => requestActivate(u)}
-                className="rounded-md bg-brand px-2 py-0.5 text-xs font-medium text-white hover:bg-brand-hover disabled:opacity-50"
+                className="rounded bg-brand px-1.5 py-0.5 text-[10px] font-medium leading-tight text-white hover:bg-brand-hover disabled:opacity-50"
                 title="Confirmar pago y activar socio"
               >
                 {busy ? "…" : "Activar"}
@@ -704,8 +711,8 @@ export function AdminUsersClient({ users }: { users: SafeUser[] }) {
         const paidThisYear =
           u.paidAt && new Date(u.paidAt).getUTCFullYear() === currentYear;
         return (
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700 ring-1 ring-inset ring-emerald-200">
+          <div className="flex flex-wrap items-center gap-1">
+            <span className="inline-flex items-center rounded-full bg-emerald-50 px-1.5 py-0 text-[10px] font-medium leading-tight text-emerald-700 ring-1 ring-inset ring-emerald-200">
               Activo
             </span>
             {!paidThisYear ? (
@@ -713,7 +720,7 @@ export function AdminUsersClient({ users }: { users: SafeUser[] }) {
                 type="button"
                 disabled={busy}
                 onClick={() => requestActivate(u)}
-                className="rounded-md border border-border bg-white px-2 py-0.5 text-xs text-foreground hover:bg-zinc-50 disabled:opacity-50"
+                className="rounded border border-border bg-white px-1.5 py-0.5 text-[10px] leading-tight text-foreground hover:bg-zinc-50 disabled:opacity-50"
                 title="Confirmar renovación de este año"
               >
                 {busy ? "…" : "Renovar"}
@@ -724,7 +731,7 @@ export function AdminUsersClient({ users }: { users: SafeUser[] }) {
       }
       case "paidAmount":
         return (
-          <span className="whitespace-nowrap font-mono text-xs">
+          <span className="whitespace-nowrap font-mono text-[10px] leading-tight">
             {formatEuros(u.paidAmount)}
           </span>
         );
@@ -735,25 +742,28 @@ export function AdminUsersClient({ users }: { users: SafeUser[] }) {
         const delivered = u.deliveryStatus === "delivered";
         const busy = pendingId === u.id;
         return (
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-1">
             {delivered ? (
               <span
-                className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700 ring-1 ring-inset ring-emerald-200"
+                className="inline-flex max-w-full items-center rounded-full bg-emerald-50 px-1.5 py-0 text-[10px] font-medium leading-tight text-emerald-700 ring-1 ring-inset ring-emerald-200"
                 title={
                   u.deliveredAt
                     ? `Entregado ${new Date(u.deliveredAt).toLocaleString("es-ES")}`
                     : "Entregado"
                 }
               >
-                Entregado
+                <span className="truncate">Entregado</span>
                 {u.deliveredAt ? (
-                  <span className="ml-1 font-normal text-emerald-600">
-                    {new Date(u.deliveredAt).toLocaleDateString("es-ES")}
+                  <span className="ml-0.5 shrink-0 font-normal text-emerald-600">
+                    {new Date(u.deliveredAt).toLocaleDateString("es-ES", {
+                      day: "2-digit",
+                      month: "2-digit",
+                    })}
                   </span>
                 ) : null}
               </span>
             ) : (
-              <span className="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700 ring-1 ring-inset ring-amber-200">
+              <span className="inline-flex items-center rounded-full bg-amber-50 px-1.5 py-0 text-[10px] font-medium leading-tight text-amber-700 ring-1 ring-inset ring-amber-200">
                 Pendiente
               </span>
             )}
@@ -762,7 +772,7 @@ export function AdminUsersClient({ users }: { users: SafeUser[] }) {
                 type="button"
                 disabled={busy}
                 onClick={() => requestDelivery(u, "undo")}
-                className="rounded-md border border-border bg-white px-2 py-0.5 text-xs text-foreground hover:bg-zinc-50 disabled:opacity-50"
+                className="rounded border border-border bg-white px-1.5 py-0.5 text-[10px] leading-tight text-foreground hover:bg-zinc-50 disabled:opacity-50"
               >
                 {busy ? "…" : "Deshacer"}
               </button>
@@ -771,7 +781,8 @@ export function AdminUsersClient({ users }: { users: SafeUser[] }) {
                 type="button"
                 disabled={busy}
                 onClick={() => requestDelivery(u, "deliver")}
-                className="rounded-md bg-emerald-600 px-2 py-0.5 text-xs font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+                className="shrink-0 rounded bg-emerald-600 px-1.5 py-0.5 text-[10px] font-medium leading-tight text-white hover:bg-emerald-700 disabled:opacity-50"
+                title="Marcar bono como entregado al socio"
               >
                 {busy ? "…" : "Marcar entregado"}
               </button>
@@ -787,40 +798,35 @@ export function AdminUsersClient({ users }: { users: SafeUser[] }) {
         if (u.status !== "active") {
           return <span className="text-muted">—</span>;
         }
-        const busy = pendingId === u.id;
-        const enabled = Boolean(u.canValidatePrizes);
         return (
-          <button
-            type="button"
-            role="switch"
-            aria-checked={enabled}
-            disabled={busy}
-            onClick={() => void runValidatorToggle(u, !enabled)}
-            className={`inline-flex h-6 w-11 shrink-0 items-center rounded-full border transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-500 disabled:opacity-50 ${
-              enabled
-                ? "border-amber-300 bg-amber-400"
-                : "border-border bg-zinc-200"
-            }`}
-            title={
-              enabled
-                ? "Validador activo: puede canjear premios en taquilla"
-                : "Marcar como validador de canjes en taquilla"
-            }
-          >
-            <span
-              className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${
-                enabled ? "translate-x-5" : "translate-x-0.5"
-              }`}
-            />
-          </button>
+          <span className="text-muted" title="Cambiar en Editar permisos">
+            {u.canValidatePrizes ? "Sí" : "No"}
+          </span>
         );
       }
       case "createdAt":
         return (
-          <span className="whitespace-nowrap text-muted">
+          <span
+            className="block min-w-0 max-w-full truncate text-[10px] text-muted"
+            title={new Date(u.createdAt).toLocaleString("es-ES")}
+          >
             {new Date(u.createdAt).toLocaleString("es-ES")}
           </span>
         );
+      case "permissions": {
+        const busy = pendingId === u.id;
+        return (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => setPermissionsUser(u)}
+            className="rounded border border-border bg-white px-1.5 py-0.5 text-[10px] font-medium leading-tight text-foreground hover:bg-zinc-50 disabled:opacity-50"
+            title="Gestionar permisos (admin, validador, reservas…)"
+          >
+            Editar
+          </button>
+        );
+      }
       default:
         return null;
     }
@@ -1069,11 +1075,11 @@ export function AdminUsersClient({ users }: { users: SafeUser[] }) {
         </div>
       </div>
 
-      <div className="space-y-3 lg:hidden">
+        <div className="space-y-3 lg:hidden text-[13px] leading-snug">
         {sorted.map((u) => (
           <article
             key={u.id}
-            className="rounded-xl border border-border bg-card p-4 shadow-sm"
+            className="rounded-xl border border-border bg-card p-3.5 shadow-sm"
           >
             <div className="flex items-start gap-3">
               <input
@@ -1084,18 +1090,21 @@ export function AdminUsersClient({ users }: { users: SafeUser[] }) {
                 aria-label={`Seleccionar ${u.name}`}
               />
               <div className="min-w-0 flex-1">
-                <p className="font-mono text-xs text-muted">
+                <p className="font-mono text-[10px] text-muted">
                   {cellValue(u, "membershipId")}
                 </p>
-                <h3 className="mt-1 text-base font-semibold leading-snug text-foreground">
+                <h3 className="mt-0.5 text-sm font-semibold leading-tight text-foreground">
                   {cellValue(u, "name")}
                 </h3>
-                <p className="mt-1 break-all text-sm text-muted">
+                <p
+                  className="mt-0.5 line-clamp-2 break-all text-xs text-muted"
+                  title={u.email}
+                >
                   {cellValue(u, "email")}
                 </p>
               </div>
             </div>
-            <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2 text-sm">
+            <dl className="mt-2.5 grid grid-cols-2 gap-x-2 gap-y-1.5 text-xs">
               <div>
                 <dt className="text-xs text-muted">Teléfono</dt>
                 <dd className="mt-0.5">{cellValue(u, "phone")}</dd>
@@ -1135,20 +1144,28 @@ export function AdminUsersClient({ users }: { users: SafeUser[] }) {
                 {cellValue(u, "deliveryStatus")}
               </div>
             </div>
+            <button
+              type="button"
+              onClick={() => setPermissionsUser(u)}
+              className="mt-2.5 w-full rounded-xl border border-border py-2 text-xs font-medium text-foreground hover:bg-zinc-50"
+            >
+              Editar permisos
+            </button>
           </article>
         ))}
       </div>
 
       <div className="hidden overflow-x-auto rounded-xl border border-border lg:block">
         <table
-          className="text-left text-xs"
+          className="text-left text-[11px] leading-tight"
           style={{ tableLayout: "fixed", width: "max-content", minWidth: "100%" }}
         >
           <thead className="border-b border-border bg-zinc-50">
             <tr>
               <th
                 scope="col"
-                className="w-10 px-1 py-1.5 align-middle font-medium"
+                style={{ width: STICKY_CHECKBOX_COL_PX, minWidth: STICKY_CHECKBOX_COL_PX }}
+                className="sticky left-0 z-30 border-r border-border/80 bg-zinc-50 px-0.5 py-1 align-middle font-medium shadow-[2px_0_4px_rgba(0,0,0,0.04)]"
               >
                 <input
                   ref={selectAllCheckboxRef}
@@ -1161,12 +1178,29 @@ export function AdminUsersClient({ users }: { users: SafeUser[] }) {
                   title="Seleccionar o deseleccionar la vista actual"
                 />
               </th>
-              {COLUMNS.map(({ key, label }) => (
+              {COLUMNS.map(({ key, label }) => {
+                const isStickySocio = key === "membershipId";
+                const isStickyName = key === "name";
+                const stickyTh =
+                  isStickySocio
+                    ? "relative sticky z-20 border-r border-border/60 bg-zinc-50 shadow-[2px_0_4px_rgba(0,0,0,0.04)]"
+                    : isStickyName
+                      ? "relative sticky z-20 border-r border-border bg-zinc-50 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.08)]"
+                      : "relative";
+                const thStyle: CSSProperties = {
+                  width: widths[key],
+                  ...(isStickySocio
+                    ? { left: STICKY_CHECKBOX_COL_PX }
+                    : isStickyName
+                      ? { left: stickyNameColLeft }
+                      : {}),
+                };
+                return (
                 <th
                   key={key}
                   scope="col"
-                  style={{ width: widths[key] }}
-                  className="relative px-0 py-0 font-medium"
+                  style={thStyle}
+                  className={`px-0 py-0 font-medium ${stickyTh}`}
                   aria-sort={
                     sortKey === key
                       ? sortDir === "asc"
@@ -1177,10 +1211,12 @@ export function AdminUsersClient({ users }: { users: SafeUser[] }) {
                 >
                   <button
                     type="button"
-                    className="flex w-full items-center gap-1 px-2 py-1.5 pr-3 text-left hover:bg-zinc-100/80"
+                    className="flex w-full items-center gap-0.5 px-1.5 py-1 pr-2 text-left hover:bg-zinc-100/80"
                     onClick={() => onHeaderClick(key)}
                   >
-                    <span className="truncate">{label}</span>
+                    <span className="truncate text-[11px] font-medium leading-tight">
+                      {label}
+                    </span>
                     {sortKey === key ? (
                       <span className="shrink-0 text-muted" aria-hidden>
                         {sortDir === "asc" ? "↑" : "↓"}
@@ -1196,30 +1232,52 @@ export function AdminUsersClient({ users }: { users: SafeUser[] }) {
                     onMouseDown={(e) => startResize(key, e)}
                   />
                 </th>
-              ))}
+                );
+              })}
             </tr>
           </thead>
           <tbody>
             {sorted.map((u) => (
               <tr key={u.id} className="border-b border-border last:border-0">
-                <td className="w-10 px-1 py-1.5 align-top">
+                <td
+                  style={{ width: STICKY_CHECKBOX_COL_PX, minWidth: STICKY_CHECKBOX_COL_PX }}
+                  className="sticky left-0 z-30 border-r border-border/80 bg-white px-0.5 py-1 align-top shadow-[2px_0_4px_rgba(0,0,0,0.04)]"
+                >
                   <input
                     type="checkbox"
                     checked={selectedIds.has(u.id)}
                     onChange={() => toggleSelectOne(u.id)}
-                    className="h-4 w-4 accent-brand"
+                    className="h-3.5 w-3.5 accent-brand"
                     aria-label={`Seleccionar ${u.name}`}
                   />
                 </td>
-                {COLUMNS.map(({ key }) => (
+                {COLUMNS.map(({ key }) => {
+                  const isStickySocio = key === "membershipId";
+                  const isStickyName = key === "name";
+                  const stickyTd =
+                    isStickySocio
+                      ? "sticky z-20 border-r border-border/60 bg-white shadow-[2px_0_4px_rgba(0,0,0,0.04)]"
+                      : isStickyName
+                        ? "sticky z-20 border-r border-border bg-white shadow-[4px_0_8px_-2px_rgba(0,0,0,0.08)]"
+                        : "";
+                  const tdStyle: CSSProperties = {
+                    width: widths[key],
+                    ...(isStickySocio
+                      ? { left: STICKY_CHECKBOX_COL_PX }
+                      : isStickyName
+                        ? { left: stickyNameColLeft }
+                        : {}),
+                  };
+                  return (
                   <td
                     key={key}
-                    style={{ width: widths[key] }}
-                    className="px-2 py-1.5 align-top"
+                    style={tdStyle}
+                    className={`px-1.5 py-1 align-top ${stickyTd}`}
                   >
                     {cellValue(u, key)}
                   </td>
-                ))}
+                  );
+                })}
               </tr>
             ))}
           </tbody>
@@ -1264,7 +1322,23 @@ export function AdminUsersClient({ users }: { users: SafeUser[] }) {
         onClose={() => setScannedUserId(null)}
         onActivate={requestActivate}
         onDelivery={requestDelivery}
+        onOpenPermissions={(u) => {
+          setScannedUserId(null);
+          setPermissionsUser(u);
+        }}
       />
+
+      {permissionsUser ? (
+        <UserPermissionsModal
+          user={permissionsUser}
+          onClose={() => setPermissionsUser(null)}
+          onSaved={(u) => {
+            startTransition(() => {
+              setRows((prev) => prev.map((row) => (row.id === u.id ? u : row)));
+            });
+          }}
+        />
+      ) : null}
 
       {pendingConfirm?.kind === "activate" ? (
         <AdminConfirmDialog

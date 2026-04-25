@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { getAdminUserOrRedirect } from "@/lib/auth/admin";
+import { userIsReservationStaff } from "@/lib/auth/reservations";
 
 export const dynamic = "force-dynamic";
 
@@ -8,7 +10,9 @@ export const dynamic = "force-dynamic";
  * El `AdminLayout` ya garantiza que solo entran usuarios con `isAdmin: true`,
  * así que aquí solo ofrecemos la navegación a las distintas secciones.
  */
-export default function AdminHomePage() {
+export default async function AdminHomePage() {
+  const user = await getAdminUserOrRedirect();
+  const showReservations = userIsReservationStaff(user);
   return (
     <div className="mx-auto max-w-4xl px-4 py-12">
       <div className="mb-10">
@@ -56,6 +60,43 @@ export default function AdminHomePage() {
             Abrir socios →
           </span>
         </Link>
+
+        {showReservations ? (
+          <Link
+            href="/admin/reservas"
+            className="group flex flex-col gap-3 rounded-2xl border border-border bg-card p-6 shadow-sm transition hover:border-brand hover:shadow-md"
+          >
+            <div className="flex items-center gap-3">
+              <span
+                aria-hidden
+                className="flex h-11 w-11 items-center justify-center rounded-xl bg-brand/10 text-brand"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={1.8}
+                  className="h-6 w-6"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M8.25 6.75h7.5M8.25 12h7.5m-7.5 5.25h4.5M3 4.875C3 4.116 3.616 3.5 4.375 3.5h15.25c.759 0 1.375.616 1.375 1.375v14.25c0 .759-.616 1.375-1.375 1.375H4.375A1.375 1.375 0 013 19.125V4.875z"
+                  />
+                </svg>
+              </span>
+              <h2 className="text-lg font-semibold tracking-wide">RESERVAS</h2>
+            </div>
+            <p className="text-sm text-muted">
+              Tablero de reservas, chat con los clientes, gestión del servicio y
+              configuración de horarios/señal.
+            </p>
+            <span className="mt-auto text-sm font-medium text-brand group-hover:text-brand-hover">
+              Abrir reservas →
+            </span>
+          </Link>
+        ) : null}
 
         <Link
           href="/admin/programacion"

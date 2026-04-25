@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { hashPassword } from "@/lib/auth/password";
 import { isCarnetPurchaseClosed } from "@/lib/carnet-purchase-deadline";
 import { getEnv } from "@/lib/env";
+import { enforceRateLimit, RateLimitError } from "@/lib/rate-limit";
 import {
   canRenewThisYear,
   createPendingUser,
@@ -12,6 +13,12 @@ import {
   UserAlreadyPaidThisYearError,
 } from "@/lib/repositories/users";
 import { registrationStartSchema } from "@/lib/validation";
+
+function extractClientIp(request: Request): string {
+  const xff = request.headers.get("x-forwarded-for");
+  if (xff) return xff.split(",")[0]?.trim() || "unknown";
+  return request.headers.get("x-real-ip") ?? "unknown";
+}
 
 /**
  * Alta o renovación desde `/registro`.
@@ -29,6 +36,31 @@ import { registrationStartSchema } from "@/lib/validation";
  */
 export async function POST(request: Request) {
   try {
+    // Rate-limit antes incluso de parsear el JSON: 6 intentos por IP cada
+    // 10 minutos. Frena spam de altas y enumeración masiva de emails sin
+    // afectar a usuarios reales que se equivocan al rellenar el form.
+    try {
+      await enforceRateLimit({
+        key: `auth:registration:ip:${extractClientIp(request)}`,
+        windowMs: 10 * 60 * 1000,
+        max: 6,
+      });
+    } catch (err) {
+      if (err instanceof RateLimitError) {
+        return NextResponse.json(
+          {
+            error:
+              "Demasiados intentos. Espera unos minutos y vuelve a intentarlo.",
+          },
+          {
+            status: 429,
+            headers: { "Retry-After": String(err.retryAfterSec) },
+          },
+        );
+      }
+      throw err;
+    }
+
     const json = await request.json();
     const parsed = registrationStartSchema.safeParse(json);
     if (!parsed.success) {
@@ -90,7 +122,7 @@ export async function POST(request: Request) {
       });
     }
 
-    if (isCarnetPurchaseClosed()) {
+    if (await isCarnetPurchaseClosed()) {
       return NextResponse.json(
         {
           error:
@@ -112,20 +144,24 @@ export async function POST(request: Request) {
         birthYear,
       });
     } catch (err) {
-      if (err instanceof EmailAlreadyActiveError) {
+      // Unificamos las dos respuestas 409 ("cuenta activa" vs "draft
+      // pendiente") en un único mensaje neutral. Antes el copy permitía
+      // enumerar el estado del email (activo vs draft); ahora un atacante
+      // que pruebe emails sólo distingue 200 (no existe) de 409 (existe
+      // en algún estado), con el mismo coste de respuesta.
+      //
+      // El usuario legítimo sigue teniendo una salida clara: si recuerda
+      // la contraseña entra; si no, recupera. En el caso de un draft
+      // pending_payment, "recuperar contraseña" también funciona porque
+      // `createPendingUser` ya guardó el `passwordHash`.
+      if (
+        err instanceof EmailAlreadyActiveError ||
+        err instanceof PendingRegistrationExistsError
+      ) {
         return NextResponse.json(
           {
             error:
-              "Ya existe una cuenta activa con ese email. Inicia sesión o recupera tu contraseña.",
-          },
-          { status: 409 },
-        );
-      }
-      if (err instanceof PendingRegistrationExistsError) {
-        return NextResponse.json(
-          {
-            error:
-              "Ya hay un registro pendiente de pago con ese email. Completa el pago o espera unos minutos.",
+              "Ya hay un registro asociado a ese email. Si es tuyo, inicia sesión o usa la opción de recuperar contraseña.",
           },
           { status: 409 },
         );
@@ -135,7 +171,10 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ url: paymentLink, userId: user.id });
   } catch (e) {
-    console.error(e);
+    // Solo el mensaje: evita volcar stacks completos con metadatos de la
+    // petición (datos del formulario, hashes parciales, etc.) en logs.
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error(`[registration][start] error: ${msg}`);
     return NextResponse.json(
       { error: "No se pudo iniciar el registro" },
       { status: 500 },

@@ -35,6 +35,8 @@ function serializeStatus(status: RouletteStatus) {
     spinsPerCycle: status.spinsPerCycle,
     disabled: status.disabled,
     shadow: status.shadow,
+    closed: status.closed,
+    opensAt: status.opensAt,
     activePrize,
     activeConsolation,
   };

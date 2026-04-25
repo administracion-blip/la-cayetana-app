@@ -88,6 +88,21 @@ export interface UserRecord {
    * tiene por qué acceder al panel. Solo aplica a cuentas con `status = active`.
    */
   canValidatePrizes?: boolean;
+  // ── Permisos granulares del módulo Reservas ────────────────────────────
+  // Son campos opcionales para no romper compatibilidad con socios
+  // existentes: `undefined` se trata como `false`. Solo tienen efecto si
+  // el usuario es staff (p. ej. `isAdmin` true o cuenta interna); un socio
+  // normal no los utilizará jamás.
+  /** Staff: puede ver y gestionar reservas (confirmar, cambiar estado...). */
+  canManageReservations?: boolean;
+  /** Staff: puede escribir en el chat de una reserva (incluye adjuntar menús/cartas). */
+  canReplyReservationChats?: boolean;
+  /** Staff: puede editar la configuración de slots y el template de prepago. */
+  canEditReservationConfig?: boolean;
+  /** Staff: puede subir/editar/eliminar los documentos PDF (menús, cartas, condiciones). */
+  canManageReservationDocuments?: boolean;
+  /** Staff: puede escribir notas internas (visibles solo para staff) en una reserva. */
+  canWriteReservationNotes?: boolean;
 }
 
 /** Token de un solo uso para restablecer contraseña (misma tabla Dynamo que users). */
@@ -233,6 +248,21 @@ export interface RouletteConfigRecord {
   timezone: string;
   /** Hora local a la que abre un nuevo ciclo (0..23). Por defecto 13. */
   cycleStartHour: number;
+  /**
+   * Hora local (0..23) a la que la jornada termina y la ruleta queda
+   * **cerrada** (no se pueden iniciar tiradas) hasta `cycleStartHour`.
+   * Por defecto 4 → jornada "abierta" 13:00 → 04:00, cerrada 04:00 → 13:00.
+   * El usuario shadow nunca se ve afectado por esta ventana.
+   */
+  closedWindowStartHour: number;
+  /**
+   * Hora local (0..23) a la que la ruleta vuelve a estar operativa. Se usa
+   * solo para calcular `opensAt` en el cliente; se asume igual a
+   * `cycleStartHour`, pero se guarda explícito por claridad y por si en el
+   * futuro se quieren separar (p. ej. cerrar antes del siguiente ciclo).
+   * Por defecto 13.
+   */
+  closedWindowEndHour: number;
   /** Nº máximo de tiradas por socio y ciclo. Por defecto 2. */
   spinsPerCycle: number;
   /** Segundos para canjear un premio antes de que caduque. Por defecto 900. */
@@ -423,4 +453,515 @@ export interface RouletteConsolationRecord {
   expiresAt: string;
   redeemedAt?: string | null;
   redeemedByUserId?: string | null;
+}
+
+// ─── Reservas (módulo conversacional de reservas de menú/mesa) ────────────
+
+/**
+ * Identifica a quién pertenece una reserva. Solo uno de los dos ids estará
+ * presente según el canal de creación: socios logueados usan `userId`;
+ * invitados sin cuenta usan `guestId`. No se mezclan.
+ */
+export interface ReservationIdentity {
+  userId: string | null;
+  guestId: string | null;
+}
+
+/**
+ * Estados por los que pasa una reserva. Son independientes del estado del
+ * chat y del estado de pago; se actualizan con `TransactWrite` + `version`
+ * para evitar carreras entre staff y cliente.
+ *
+ *  - `pending`: el cliente envió la solicitud y staff aún no respondió.
+ *  - `awaiting_customer`: staff respondió y espera aceptación del cliente
+ *    (normalmente tras un cambio de hora/condiciones).
+ *  - `awaiting_prepayment`: reserva con ≥ 8 personas pendiente de pago por
+ *    transferencia manual. Staff debe confirmar la recepción.
+ *  - `confirmed`: reserva en firme, visible en el tablero de servicio.
+ *  - `cancelled_by_customer`: el cliente canceló desde la app / magic link.
+ *  - `cancelled_by_staff`: staff canceló desde el panel (p. ej. aforo).
+ *  - `no_show`: staff marcó que no se presentó (auditoría).
+ *  - `completed`: staff marcó que asistió y terminó el servicio.
+ *
+ * Se consideran "activas y no finalizadas" (para la pantalla de decisión
+ * en la app) los estados: `pending`, `awaiting_customer`,
+ * `awaiting_prepayment`, `confirmed`.
+ */
+export type ReservationStatus =
+  | "pending"
+  | "awaiting_customer"
+  | "awaiting_prepayment"
+  | "confirmed"
+  | "cancelled_by_customer"
+  | "cancelled_by_staff"
+  | "no_show"
+  | "completed";
+
+/**
+ * Estado del prepago (solo aplica a reservas con `partySize >= 8`). En
+ * reservas menores de 8 este campo es `not_required`.
+ */
+export type PrepaymentStatus =
+  | "not_required"
+  | "pending_instructions"
+  | "awaiting_transfer"
+  | "received"
+  | "refunded";
+
+/**
+ * Justificante de señal (PDF/imagen) con importe. Varias entradas por reserva
+ * reempluyen el modelo de un solo `prepaymentProofS3Key` antiguo.
+ */
+export interface PrepaymentProofItem {
+  proofId: string;
+  s3Key: string;
+  fileName: string;
+  /** Céntimos abonados documentados con este justificante. */
+  amountCents: number;
+  uploadedAt: string;
+}
+
+/** entityType de cada ítem de `la_cayetana_reservations` (discriminante). */
+export type ReservationEntityType =
+  | "RESERVATION"
+  | "RESERVATION_MESSAGE"
+  | "RESERVATION_EVENT"
+  | "RESERVATION_NOTE"
+  | "RESERVATION_GUEST"
+  | "RESERVATION_DOCUMENT"
+  | "RESERVATION_CONFIG"
+  | "RESERVATION_OTP";
+
+/**
+ * Código OTP de un solo uso para que un guest recupere el acceso a sus
+ * reservas sin abrir el magic link del email.
+ *
+ * Claves:
+ *  - `PK = "OTP#<emailNormalized>"`, `SK = "CURRENT"`.
+ *
+ * Un solo registro por email — al pedir un código nuevo sobreescribimos
+ * el anterior (invalida implicitamente los intentos acumulados). El
+ * código se guarda hasheado (SHA-256 con `pepper`) para que ni siquiera
+ * el operador pueda leerlo en DynamoDB. `expiresAtIso` es el corte
+ * real; el atributo TTL nativo de DynamoDB (`ttlEpoch`) lo limpia
+ * automáticamente pasados unos minutos para no ensuciar la tabla.
+ */
+export interface ReservationOtpRecord {
+  PK: `OTP#${string}`;
+  SK: "CURRENT";
+  entityType: "RESERVATION_OTP";
+  emailNormalized: string;
+  codeHash: string;
+  attempts: number;
+  /** Epoch en segundos para el atributo TTL nativo de DynamoDB. */
+  ttlEpoch: number;
+  /** ISO string de expiración (para lógica en código). */
+  expiresAtIso: string;
+  createdAt: string;
+}
+
+/**
+ * Datos de contacto denormalizados de la reserva. Se guardan junto a la
+ * `RESERVATION` (aunque el usuario esté logueado) para que el tablero de
+ * servicio pueda leer en una única llamada todo lo necesario.
+ */
+export interface ReservationContactSnapshot {
+  name: string;
+  email: string;
+  /** Normalizado a E.164 si es posible; si no, limpio de espacios. */
+  phone: string;
+}
+
+/**
+ * Ítem principal de una reserva.
+ *
+ * Claves:
+ *  - `PK = "RES#<reservationId>"`, `SK = "META"`.
+ *  - GSI1 `by-status-date`: `GSI1PK = "STATUS#<status>"`,
+ *    `GSI1SK = "<reservationStartAtIso>#<reservationId>"`.
+ *  - GSI2 `by-date`: `GSI2PK = "DATE#<yyyy-MM-dd>"`,
+ *    `GSI2SK = "<startMinutes>#<reservationId>"` (ordenado por hora).
+ *  - GSI3 `by-customer`:
+ *      `GSI3PK = "USER#<userId>"` o `"GUEST#<guestId>"`,
+ *      `GSI3SK = "<reservationStartAtIso>#<reservationId>"` — permite
+ *      listar del más próximo al más lejano.
+ *  - GSI4 `by-email`: `GSI4PK = "EMAIL#<normalizedEmail>"`,
+ *    `GSI4SK = "RES#<createdAt>#<reservationId>"` — se usa tanto para
+ *    detectar duplicados entre canales (user ↔ guest) como para que staff
+ *    encuentre todas las reservas de un email.
+ */
+export interface ReservationRecord {
+  PK: `RES#${string}`;
+  SK: "META";
+  GSI1PK?: `STATUS#${ReservationStatus}`;
+  GSI1SK?: string;
+  GSI2PK?: `DATE#${string}`;
+  GSI2SK?: string;
+  GSI3PK?: `USER#${string}` | `GUEST#${string}`;
+  GSI3SK?: string;
+  GSI4PK?: `EMAIL#${string}`;
+  GSI4SK?: string;
+  entityType: "RESERVATION";
+  reservationId: string;
+
+  // Identidad del cliente (uno y solo uno de los dos es no-null).
+  userId: string | null;
+  guestId: string | null;
+  membershipId?: string;
+
+  // Snapshot de contacto (denormalizado, ver `ReservationContactSnapshot`).
+  contact: ReservationContactSnapshot;
+
+  // Fecha + hora elegidas por el cliente. `reservationDate` en local
+  // `yyyy-MM-dd`, `reservationTime` en `HH:mm` local 24h. La conversión
+  // a instante UTC la hacemos aquí para indexar por GSI.
+  reservationDate: string;
+  reservationTime: string;
+  /** Instante UTC (ISO) equivalente a `reservationDate + reservationTime`. */
+  reservationStartAtIso: string;
+  /** Minuto del día (0..1439) — sirve para ordenar dentro del GSI2. */
+  startMinutes: number;
+
+  partySize: number;
+  /**
+   * Etiqueta de mesa asignada en sala (texto libre, p. ej. "3" o "12A").
+   * Solo backoffice; no afecta a índices.
+   */
+  tableLabel?: string;
+  /** Petición textual libre (alérgenos, cumpleaños, decoración...). */
+  notes?: string;
+  /**
+   * Menús elegidos: la suma de `quantity` debe ser igual a `partySize`.
+   * Incluye snapshot de nombre, importe y principales. Reservas antiguas
+   * pueden no tener el campo.
+   */
+  menuLineItems?: ReservationMenuLineItem[];
+
+  status: ReservationStatus;
+  prepaymentStatus: PrepaymentStatus;
+
+  /** Importe de prepago en céntimos, si aplica. */
+  prepaymentAmountCents?: number;
+  /** Deadline ISO para transferir (se fija al pasar a `awaiting_prepayment`). */
+  prepaymentDeadlineAt?: string;
+  /** Instrucciones de prepago personalizadas para esta reserva (snapshot). */
+  prepaymentInstructions?: string;
+  prepaymentReceivedAt?: string;
+  prepaymentReceivedByUserId?: string;
+  /**
+   * Justificante de señal subido al marcar "recibido" (staff). Privado, S3.
+   * @deprecated Sustituido por `prepaymentProofItems`; se conserva en lectura/migración.
+   */
+  prepaymentProofS3Key?: string;
+  /**
+   * Nombre original del archivo (solo backoffice / auditoría).
+   * @deprecated Sustituido por `prepaymentProofItems`.
+   */
+  prepaymentProofFileName?: string;
+  /** Varios comprobantes con importe. Si existen, prevalecen sobre la pareja legacy. */
+  prepaymentProofItems?: PrepaymentProofItem[];
+
+  /** Último evento público/ cliente (para pintar la pantalla rápida). */
+  lastClientVisibleStatus?: ReservationStatus;
+
+  createdAt: string;
+  /** Canal desde el que se creó (`app` para logueados, `guest_link` para guest). */
+  createdVia: "app" | "guest_link";
+  /** Timestamp del último update (cualquier cambio en la reserva). */
+  updatedAt: string;
+  /** Quien hizo el último cambio (staff userId, cliente userId o `guest:<guestId>`). */
+  updatedBy?: string;
+
+  /** Optimistic concurrency: se incrementa con cada `updateReservation`. */
+  version: number;
+
+  // Contadores para la UI. No son la verdad absoluta (la verdad son los
+  // MSG), pero permiten pintar el badge de "no leídos" sin hacer query.
+  unreadForStaff: number;
+  unreadForCustomer: number;
+  lastMessageAt?: string;
+}
+
+/**
+ * Mensaje de chat de una reserva. Append-only.
+ *  - `PK = "RES#<reservationId>"`, `SK = "MSG#<createdAt>#<messageId>"`.
+ */
+export interface ReservationMessageRecord {
+  PK: `RES#${string}`;
+  SK: `MSG#${string}`;
+  entityType: "RESERVATION_MESSAGE";
+  messageId: string;
+  reservationId: string;
+  /** Quien envía: el cliente o un staff concreto. */
+  authorType: "customer" | "staff" | "system";
+  /** userId del staff si `authorType === "staff"`. Si es customer, el userId/guestId del cliente. */
+  authorId: string | null;
+  /** Nombre visible del autor (snapshot): "Juan" o "Equipo La Cayetana". */
+  authorDisplayName: string;
+  body: string;
+  createdAt: string;
+  /** Referencias a documentos (p. ej. "carta-2026.pdf") adjuntados. */
+  documentIds?: string[];
+  /** `true` si lo leyó el cliente; los mensajes del cliente empiezan `true` por el propio cliente. */
+  readByCustomerAt?: string | null;
+  readByStaffAt?: string | null;
+}
+
+/**
+ * Evento de auditoría (cambio de estado, cancelación, prepago recibido...).
+ * Append-only. No se muestran al cliente salvo los marcados como públicos.
+ *  - `PK = "RES#<reservationId>"`, `SK = "EVT#<createdAt>#<eventId>"`.
+ */
+export interface ReservationEventRecord {
+  PK: `RES#${string}`;
+  SK: `EVT#${string}`;
+  entityType: "RESERVATION_EVENT";
+  eventId: string;
+  reservationId: string;
+  /** Código normalizado del evento (`status_changed`, `prepayment_received`, ...). */
+  kind: string;
+  /** Metadata arbitraria (estado anterior/nuevo, importe, etc.). */
+  meta?: Record<string, unknown>;
+  /** Si es `true`, se muestra en la línea de tiempo del cliente. */
+  publicToCustomer: boolean;
+  createdAt: string;
+  createdBy: string;
+}
+
+/**
+ * Nota interna del staff sobre una reserva. Nunca visible para cliente.
+ *  - `PK = "RES#<reservationId>"`, `SK = "NOTE#<createdAt>#<noteId>"`.
+ */
+export interface ReservationNoteRecord {
+  PK: `RES#${string}`;
+  SK: `NOTE#${string}`;
+  entityType: "RESERVATION_NOTE";
+  noteId: string;
+  reservationId: string;
+  body: string;
+  createdAt: string;
+  createdByUserId: string;
+  createdByDisplayName: string;
+}
+
+/**
+ * Ficha de invitado (guest, sin cuenta). Se crea la primera vez que un
+ * email no registrado hace una reserva; se reutiliza en visitas futuras
+ * del mismo email.
+ *  - `PK = "GUEST#<guestId>"`, `SK = "META"`.
+ *  - GSI4 `by-email`: `GSI4PK = "EMAIL#<normalizedEmail>"`,
+ *    `GSI4SK = "GUEST#<guestId>"`.
+ */
+export interface GuestRecord {
+  PK: `GUEST#${string}`;
+  SK: "META";
+  GSI4PK?: `EMAIL#${string}`;
+  GSI4SK?: `GUEST#${string}`;
+  entityType: "RESERVATION_GUEST";
+  guestId: string;
+  name: string;
+  email: string;
+  /** Email normalizado (lowercase + trim) usado como clave de índices. */
+  emailNormalized: string;
+  phone: string;
+  /**
+   * Versión incremental de las sesiones del guest. Se aumenta cuando staff
+   * aplica un cambio significativo en cualquiera de sus reservas (fecha,
+   * hora, estado relevante) para invalidar el magic link previo.
+   */
+  sessionVersion: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * Documento PDF (carta, menús, condiciones de prepago...). Se sirve a
+ * través del endpoint proxy `/api/reservations/documents/:id/file`; el
+ * bucket S3 es privado.
+ *  - `PK = "DOC#<documentId>"`, `SK = "META"`.
+ */
+export type ReservationDocumentKind =
+  | "menu"
+  | "carta"
+  | "bebidas"
+  | "prepayment_terms"
+  | "other";
+
+export interface ReservationDocumentRecord {
+  PK: `DOC#${string}`;
+  SK: "META";
+  entityType: "RESERVATION_DOCUMENT";
+  documentId: string;
+  kind: ReservationDocumentKind;
+  title: string;
+  description?: string;
+  /** Clave S3 dentro de `RESERVATION_DOCS_S3_BUCKET`. */
+  s3Key: string;
+  contentType: string;
+  sizeBytes: number;
+  /** Si es `true`, aparece en el catálogo mostrado al cliente desde el chat. */
+  visibleToCustomer: boolean;
+  /** Orden dentro del listado visible (asc). */
+  sortOrder: number;
+  createdAt: string;
+  createdByUserId: string;
+  updatedAt: string;
+  updatedByUserId?: string;
+}
+
+/**
+ * Configuración de slots de reservas. Define los tramos permitidos por día
+ * de la semana y excepciones concretas por fecha (cierres, festivos,
+ * horarios especiales). Ítem único:
+ *  - `PK = "CONFIG"`, `SK = "SLOTS"`.
+ */
+export interface ReservationSlotWindow {
+  /** `HH:mm` local 24h, inclusive. */
+  from: string;
+  /** `HH:mm` local 24h, inclusive. Si `to < from`, se interpreta día siguiente. */
+  to: string;
+  /** Paso en minutos (p. ej. 30 → slots 13:00, 13:30, 14:00...). */
+  stepMinutes: number;
+  /** Capacidad máxima simultánea en este tramo (comensales totales). */
+  capacity: number;
+}
+
+export interface ReservationSlotDay {
+  windows: ReservationSlotWindow[];
+}
+
+export type ReservationWeekdayKey =
+  | "sunday"
+  | "monday"
+  | "tuesday"
+  | "wednesday"
+  | "thursday"
+  | "friday"
+  | "saturday";
+
+export interface ReservationConfigSlotsRecord {
+  PK: "CONFIG";
+  SK: "SLOTS";
+  entityType: "RESERVATION_CONFIG";
+  /** Zona horaria IANA (`Europe/Madrid`). */
+  timezone: string;
+  /** Configuración por día de la semana. */
+  byWeekday: Record<ReservationWeekdayKey, ReservationSlotDay>;
+  /**
+   * Excepciones por fecha concreta (`yyyy-MM-dd`). Si la clave existe,
+   * SUSTITUYE a la de `byWeekday` para ese día. `windows = []` = cerrado.
+   */
+  exceptions: Record<string, ReservationSlotDay>;
+  /** Anticipación mínima en minutos desde `now` hasta el slot. Por defecto 120. */
+  advanceMinMinutes: number;
+  /** Máxima anticipación en días desde `now` hasta el slot. Por defecto 60. */
+  advanceMaxDays: number;
+  /**
+   * Rango fijo (opcional) de fechas reservables por el cliente, `yyyy-MM-dd`
+   * en `timezone`. Se combina con la anticipación: fecha efectiva en
+   * [max(hoy, from), min(hoy+advanceMaxDays, until)].
+   */
+  bookableFromDate?: string;
+  bookableUntilDate?: string;
+  /** Mínimo y máximo de comensales aceptados por reserva. */
+  minPartySize: number;
+  maxPartySize: number;
+  updatedAt: string;
+  updatedByUserId?: string;
+}
+
+/**
+ * Configuración del prepago manual (solo reservas `partySize >= 8`).
+ *  - `PK = "CONFIG"`, `SK = "PREPAYMENT"`.
+ */
+export interface ReservationConfigPrepaymentRecord {
+  PK: "CONFIG";
+  SK: "PREPAYMENT";
+  entityType: "RESERVATION_CONFIG";
+  /** Si es `false`, no se pide prepago en ninguna reserva. */
+  enabled: boolean;
+  /** Nº mínimo de comensales a partir del cual se exige prepago. */
+  minPartySize: number;
+  /** Importe por persona en céntimos (10 € → 1000). */
+  amountPerPersonCents: number;
+  /** Horas desde la solicitud para que el cliente transfiera. */
+  deadlineHours: number;
+  /**
+   * Plantilla editable que staff ve y puede personalizar al cambiar estado
+   * a `awaiting_prepayment`. Soporta placeholders:
+   *  `{{amount}}`, `{{deadline}}`, `{{reservationDate}}`, `{{reservationTime}}`,
+   *  `{{partySize}}`, `{{reservationId}}`.
+   */
+  instructionsTemplate: string;
+  updatedAt: string;
+  updatedByUserId?: string;
+}
+
+/** Oferta de menú (catálogo editado en la config de reservas). */
+export interface ReservationMenuOffer {
+  offerId: string;
+  name: string;
+  /** Importe de referencia en céntimos. */
+  priceCents: number;
+  /**
+   * Hasta 4 textos fijos por posición (puede incluir cadenas vacías).
+   * Antes de mostrar al cliente se omiten vacíos. Longitud 4 al guardar.
+   */
+  mainCourses: string[];
+  active: boolean;
+  sortOrder: number;
+  imageS3Key?: string;
+  imageContentType?: string;
+}
+
+/**
+ * Catálogo de menús ofrecidos.
+ *  - `PK = "CONFIG"`, `SK = "MENUS"`.
+ */
+export interface ReservationConfigMenusRecord {
+  PK: "CONFIG";
+  SK: "MENUS";
+  entityType: "RESERVATION_CONFIG";
+  offers: ReservationMenuOffer[];
+  updatedAt: string;
+  updatedByUserId?: string;
+}
+
+/**
+ * Cierres (gates) para funcionalidades públicas de la web, editables
+ * desde admin.
+ *  - `PK = "CONFIG"`, `SK = "CARNET"` (SK heredado; el ítem agrupa
+ *    ahora todos los cierres para evitar múltiples lecturas).
+ *  Misma tabla que reservas.
+ */
+export interface ReservationConfigAccessGatesRecord {
+  PK: "CONFIG";
+  SK: "CARNET";
+  entityType: "RESERVATION_CONFIG";
+  /**
+   * Tras este instante (ISO/UTC) se bloquean altas de nuevos socios vía
+   * web. `FECHA_LIMITE_COMPRA_CARNET` (env), si está definida, manda.
+   */
+  carnetPurchaseDeadlineIso?: string;
+  /** Tras este instante se desactiva crear nuevas reservas de mesa. */
+  tableReservationDeadlineIso?: string;
+  /**
+   * Tras este instante se desactiva el login público (los administradores
+   * siguen pudiendo entrar por bypass).
+   */
+  loginDeadlineIso?: string;
+  updatedAt: string;
+  updatedByUserId?: string;
+}
+
+/** @deprecated Alias retrocompatible de `ReservationConfigAccessGatesRecord`. */
+export type ReservationConfigCarnetRecord = ReservationConfigAccessGatesRecord;
+
+/** Línea persistida en la reserva (snapshot). */
+export interface ReservationMenuLineItem {
+  offerId: string;
+  quantity: number;
+  nameSnapshot: string;
+  priceCents: number;
+  mainCoursesSnapshot: string[];
 }
