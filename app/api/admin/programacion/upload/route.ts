@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { requireAdminForApi } from "@/lib/auth/admin";
 import { getEnv } from "@/lib/env";
 import { putObject } from "@/lib/s3";
+import { sniffUploadOrWarn } from "@/lib/upload/sniff";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -69,6 +70,13 @@ export async function POST(req: Request) {
   const ext = EXTENSION[contentType] ?? "bin";
   const key = `programacion/${randomUUID()}.${ext}`;
   const buffer = Buffer.from(await file.arrayBuffer());
+
+  // Warn-only: cabecera real vs MIME declarado. Hoy solo loggea.
+  sniffUploadOrWarn(buffer, contentType, {
+    endpoint: "admin/programacion/upload",
+    adminUserId: auth.user.id,
+    fileName: typeof file.name === "string" ? file.name : undefined,
+  });
 
   const { PROGRAMACION_S3_BUCKET } = getEnv();
   try {

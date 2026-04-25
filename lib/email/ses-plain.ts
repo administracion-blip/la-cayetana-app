@@ -1,5 +1,6 @@
 import { SESClient, SendEmailCommand } from "@aws-sdk/client-ses";
 import { getEnv } from "@/lib/env";
+import { hashTag, redactEmail } from "@/lib/log/redact";
 
 /** Resultado del intento de envío (solo para logs / lógica servidor). */
 export type SesPlainTextEmailResult =
@@ -24,9 +25,12 @@ export async function sendSesPlainTextEmail(params: {
     from = undefined;
   }
 
+  const toRedacted = redactEmail(params.to);
+  const toTag = hashTag(params.to);
+
   if (!from) {
     console.warn(
-      `[email] send skipped: missing_from_email subject="${params.subject}" to=${params.to}`,
+      `[email] send skipped: missing_from_email subject="${params.subject}" to=${toRedacted} toHash=${toTag}`,
     );
     return { ok: false, mode: "log-only", reason: "missing_from_email" };
   }
@@ -46,13 +50,13 @@ export async function sendSesPlainTextEmail(params: {
       }),
     );
     console.log(
-      `[email] SES SendEmail succeeded to=${params.to} region=${AWS_REGION}`,
+      `[email] SES SendEmail succeeded to=${toRedacted} toHash=${toTag} region=${AWS_REGION}`,
     );
     return { ok: true, mode: "ses" };
   } catch (e) {
     const errorMessage = e instanceof Error ? e.message : String(e);
     console.error(
-      `[email] SES SendEmail failed to=${params.to} region=${AWS_REGION}`,
+      `[email] SES SendEmail failed to=${toRedacted} toHash=${toTag} region=${AWS_REGION}`,
       errorMessage,
     );
     return {

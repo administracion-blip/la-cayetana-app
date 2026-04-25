@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { generateRawResetToken, hashResetToken } from "@/lib/auth/reset-token";
 import { sendPasswordResetEmail } from "@/lib/email/password-reset-mail";
 import { getEnv } from "@/lib/env";
+import { hashTag, redactEmail } from "@/lib/log/redact";
 import { savePasswordResetToken } from "@/lib/repositories/password-reset";
 import { getUserByEmail } from "@/lib/repositories/users";
 import { normalizeEmail } from "@/lib/constants";
@@ -25,18 +26,24 @@ export async function POST(request: Request) {
     }
 
     const email = normalizeEmail(parsed.data.email);
-    console.info(`${LOG} lookup emailNormalized=${email}`);
+    const emailTag = hashTag(email);
+    const emailRedacted = redactEmail(email);
+    console.info(
+      `${LOG} lookup email=${emailRedacted} emailHash=${emailTag}`,
+    );
 
     const user = await getUserByEmail(email);
 
     if (!user) {
-      console.info(`${LOG} no user for normalized email=${email}`);
+      console.info(
+        `${LOG} no user for normalized email=${emailRedacted} emailHash=${emailTag}`,
+      );
       return NextResponse.json(GENERIC_OK);
     }
 
     if (user.status !== "active") {
       console.info(
-        `${LOG} user found but not eligible for reset userId=${user.id} status=${user.status} emailNormalized=${email}`,
+        `${LOG} user found but not eligible for reset userId=${user.id} status=${user.status} email=${emailRedacted} emailHash=${emailTag}`,
       );
       return NextResponse.json(GENERIC_OK);
     }
@@ -50,21 +57,21 @@ export async function POST(request: Request) {
     const tokenHash = hashResetToken(rawToken);
     await savePasswordResetToken(tokenHash, user.id);
     console.info(
-      `${LOG} password reset token persisted userId=${user.id} emailNormalized=${email}`,
+      `${LOG} password reset token persisted userId=${user.id} emailHash=${emailTag}`,
     );
 
     const baseUrl = getEnv().NEXT_PUBLIC_APP_URL.replace(/\/$/, "");
     const resetUrl = `${baseUrl}/reset-password?token=${encodeURIComponent(rawToken)}`;
 
     console.info(
-      `${LOG} attempting password reset email delivery userId=${user.id} emailNormalized=${email}`,
+      `${LOG} attempting password reset email delivery userId=${user.id} emailHash=${emailTag}`,
     );
 
     const sendResult = await sendPasswordResetEmail(user.email, resetUrl);
 
     if (sendResult.ok && sendResult.mode === "ses") {
       console.info(
-        `${LOG} password reset email dispatched via SES userId=${user.id} emailNormalized=${email}`,
+        `${LOG} password reset email dispatched via SES userId=${user.id} emailHash=${emailTag}`,
       );
       return NextResponse.json(GENERIC_OK);
     }
@@ -75,7 +82,7 @@ export async function POST(request: Request) {
       sendResult.reason === "missing_from_email"
     ) {
       console.warn(
-        `${LOG} email NOT sent (SES_FROM_EMAIL missing); client still receives generic success userId=${user.id} emailNormalized=${email}`,
+        `${LOG} email NOT sent (SES_FROM_EMAIL missing); client still receives generic success userId=${user.id} emailHash=${emailTag}`,
       );
       return NextResponse.json(GENERIC_OK);
     }
@@ -86,7 +93,7 @@ export async function POST(request: Request) {
       sendResult.reason === "send_failed"
     ) {
       console.error(
-        `${LOG} SES send failed userId=${user.id} emailNormalized=${email}`,
+        `${LOG} SES send failed userId=${user.id} emailHash=${emailTag}`,
         sendResult.errorMessage ?? "",
       );
       return NextResponse.json(
