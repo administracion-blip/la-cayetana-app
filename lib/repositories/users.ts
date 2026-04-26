@@ -361,9 +361,12 @@ export async function activateUserAfterPayment(input: {
   }
 
   const paidAt = new Date().toISOString();
+  // Stripe nos da céntimos (`session.amount_total`). En Dynamo persistimos
+  // EUROS con 2 decimales (50€ → 50, 49.99€ → 49.99). Math.round protege de
+  // valores que llegasen ya con decimales por algún cambio futuro de Stripe.
   const amount =
     typeof input.amountTotal === "number" && input.amountTotal >= 0
-      ? Math.round(input.amountTotal)
+      ? Math.round(input.amountTotal) / 100
       : undefined;
 
   const pendingHash = existing.pendingPasswordHash;
@@ -506,8 +509,9 @@ export class ManualActivationError extends Error {
  *  - Renovación (`USER` + `active`) → refresca `paidAt` y resetea entrega.
  *
  * Idempotente: si ya estaba activo en el año en curso, devuelve el registro
- * sin cambios. `paidAmountCents` es opcional (si lo conoces por el recibo de
- * Stripe puedes pasarlo; si no, se deja lo que hubiese).
+ * sin cambios. `paidAmountEuros` es opcional (importe cobrado, en EUROS;
+ * 50 = 50,00 €). Por compatibilidad histórica también se acepta
+ * `paidAmountCents` (céntimos), que se convierte a euros antes de persistir.
  *
  * TODO: cuando volvamos a tener webhook/automatización, llamar a esta función
  * también desde `activateUserFromCheckoutSession` en lugar de duplicar lógica.
@@ -515,6 +519,9 @@ export class ManualActivationError extends Error {
 export async function activateUserManually(input: {
   userId: string;
   adminUserId: string;
+  /** Importe pagado en EUROS (admite decimales). */
+  paidAmountEuros?: number | null;
+  /** @deprecated usar paidAmountEuros. Si llega, se divide /100 en euros. */
   paidAmountCents?: number | null;
 }): Promise<ActivateUserResult> {
   const existing = await getUserById(input.userId);
@@ -577,12 +584,17 @@ export async function activateUserManually(input: {
     "#approvedAt = :now",
   ];
 
-  if (
-    typeof input.paidAmountCents === "number" &&
-    input.paidAmountCents >= 0
-  ) {
+  // Resolución del importe: paidAmountEuros tiene preferencia. Compat con
+  // paidAmountCents (legacy): se divide /100 para guardar en EUROS.
+  const manualEuros: number | undefined =
+    typeof input.paidAmountEuros === "number" && input.paidAmountEuros >= 0
+      ? input.paidAmountEuros
+      : typeof input.paidAmountCents === "number" && input.paidAmountCents >= 0
+        ? Math.round(input.paidAmountCents) / 100
+        : undefined;
+  if (manualEuros !== undefined) {
     names["#pAmount"] = "paidAmount";
-    values[":pAmount"] = Math.round(input.paidAmountCents);
+    values[":pAmount"] = manualEuros;
     setParts.push("#pAmount = :pAmount");
   }
   if (pendingHash) {
@@ -1476,7 +1488,9 @@ export type CreateLegacyUserInput = {
   phone?: string;
   sex?: UserSex;
   birthYear?: number;
-  /** Céntimos; si se aporta, queda como último pago registrado. */
+  /** Importe en EUROS (50 = 50,00 €). Si se aporta, queda como último pago. */
+  paidAmountEuros?: number;
+  /** @deprecated alias en céntimos (se divide /100). Usar paidAmountEuros. */
   paidAmountCents?: number;
   /** ISO date-time; si no, queda sin paidAt. */
   paidAt?: string;
@@ -1539,9 +1553,16 @@ export async function createLegacyUser(
         values[":by"] = input.birthYear;
         setParts.push("#by = :by");
       }
-      if (typeof input.paidAmountCents === "number" && input.paidAmountCents >= 0) {
+      const legacyEurosUpdate: number | undefined =
+        typeof input.paidAmountEuros === "number" && input.paidAmountEuros >= 0
+          ? input.paidAmountEuros
+          : typeof input.paidAmountCents === "number" &&
+              input.paidAmountCents >= 0
+            ? Math.round(input.paidAmountCents) / 100
+            : undefined;
+      if (legacyEurosUpdate !== undefined) {
         names["#pa"] = "paidAmount";
-        values[":pa"] = Math.round(input.paidAmountCents);
+        values[":pa"] = legacyEurosUpdate;
         names["#pc"] = "paidCurrency";
         values[":pc"] = "EUR";
         setParts.push("#pa = :pa", "#pc = :pc");
@@ -1598,11 +1619,14 @@ export async function createLegacyUser(
   if (input.phone?.trim()) user.phone = input.phone.trim();
   if (input.sex) user.sex = input.sex;
   if (typeof input.birthYear === "number") user.birthYear = input.birthYear;
-  if (
-    typeof input.paidAmountCents === "number" &&
-    input.paidAmountCents >= 0
-  ) {
-    user.paidAmount = Math.round(input.paidAmountCents);
+  const legacyEurosCreate: number | undefined =
+    typeof input.paidAmountEuros === "number" && input.paidAmountEuros >= 0
+      ? input.paidAmountEuros
+      : typeof input.paidAmountCents === "number" && input.paidAmountCents >= 0
+        ? Math.round(input.paidAmountCents) / 100
+        : undefined;
+  if (legacyEurosCreate !== undefined) {
+    user.paidAmount = legacyEurosCreate;
     user.paidCurrency = "EUR";
   }
   if (input.paidAt) user.paidAt = input.paidAt;

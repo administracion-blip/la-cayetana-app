@@ -18,6 +18,9 @@ type LegacyRow = {
   phone?: unknown;
   sex?: unknown;
   birthYear?: unknown;
+  /** Importe en EUROS (preferido). */
+  paidAmountEuros?: unknown;
+  /** @deprecated alias en céntimos (compat con Excels antiguos). */
   paidAmountCents?: unknown;
   paidAt?: unknown;
 };
@@ -149,6 +152,7 @@ export async function POST(request: Request) {
       const phone = parseString(row.phone);
       const sex = parseSex(row.sex);
       const birthYearRaw = parseOptionalNumber(row.birthYear);
+      const paidAmountEuros = parseOptionalNumber(row.paidAmountEuros);
       const paidAmountCents = parseOptionalNumber(row.paidAmountCents);
       const paidAt = parsePaidAt(row.paidAt);
 
@@ -203,6 +207,7 @@ export async function POST(request: Request) {
           phone: phone || undefined,
           sex,
           birthYear,
+          paidAmountEuros,
           paidAmountCents,
           paidAt,
         });

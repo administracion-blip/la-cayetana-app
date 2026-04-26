@@ -20,10 +20,12 @@ import {
  * Sirve tanto para altas nuevas como para renovaciones y activación de legacy.
  *
  * Body (opcional):
- *  { "paidAmountCents"?: number }  -- importe en céntimos si lo quieres grabar.
+ *  { "paidAmountEuros"?: number }  -- importe en EUROS (50 = 50,00 €).
+ *  { "paidAmountCents"?: number }  -- (deprecated) céntimos, se convierte.
  */
 const bodySchema = z
   .object({
+    paidAmountEuros: z.number().nonnegative().max(100_000).optional(),
     paidAmountCents: z
       .number()
       .int()
@@ -49,6 +51,7 @@ export async function POST(
     );
   }
 
+  let paidAmountEuros: number | undefined;
   let paidAmountCents: number | undefined;
   try {
     const json = (await req.json().catch(() => ({}))) as unknown;
@@ -56,15 +59,17 @@ export async function POST(
     if (!parsed.success) {
       return NextResponse.json({ error: "Datos inválidos" }, { status: 400 });
     }
+    paidAmountEuros = parsed.data?.paidAmountEuros;
     paidAmountCents = parsed.data?.paidAmountCents;
   } catch {
-    // cuerpo vacío: aceptado (paidAmountCents no obligatorio)
+    // cuerpo vacío: aceptado (importe no obligatorio)
   }
 
   try {
     const { user, justActivated } = await activateUserManually({
       userId: id,
       adminUserId: auth.user.id,
+      paidAmountEuros,
       paidAmountCents,
     });
 

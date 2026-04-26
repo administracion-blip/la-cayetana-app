@@ -51,7 +51,11 @@ export interface UserRecord {
   createdAt: string;
   /** Fecha en la que el pago fue confirmado (al pasar a `active`). */
   paidAt?: string;
-  /** Importe pagado en la última compra (céntimos). */
+  /**
+   * Importe pagado en la última cuota, en EUROS (admite decimales: 50 = 50,00 €,
+   * 49.5 = 49,50 €). Stripe nos da céntimos (`session.amount_total`); en
+   * `activateUserAfterPayment` los convertimos antes de persistir.
+   */
   paidAmount?: number;
   /** Divisa del último pago. Se fuerza a "EUR". */
   paidCurrency?: string;

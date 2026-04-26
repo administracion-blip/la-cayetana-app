@@ -140,9 +140,14 @@ const EUR_FORMAT = new Intl.NumberFormat("es-ES", {
   currency: "EUR",
 });
 
-function formatEuros(cents: number | undefined | null): string {
-  if (typeof cents !== "number" || Number.isNaN(cents)) return "—";
-  return EUR_FORMAT.format(cents / 100);
+/**
+ * `paidAmount` se persiste ya en EUROS (50 = 50,00 €), por lo que aquí solo
+ * formateamos. Los valores Stripe (céntimos) se convierten en el repositorio
+ * antes de guardar en Dynamo.
+ */
+function formatEuros(amount: number | undefined | null): string {
+  if (typeof amount !== "number" || Number.isNaN(amount)) return "—";
+  return EUR_FORMAT.format(amount);
 }
 
 function deliveryRank(u: SafeUser): number {

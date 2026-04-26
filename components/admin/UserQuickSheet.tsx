@@ -38,9 +38,10 @@ const EUR_FORMAT = new Intl.NumberFormat("es-ES", {
   currency: "EUR",
 });
 
-function formatEuros(cents: number | undefined | null): string {
-  if (typeof cents !== "number" || Number.isNaN(cents)) return "—";
-  return EUR_FORMAT.format(cents / 100);
+/** `paidAmount` se persiste en EUROS (con decimales). Aquí solo formateamos. */
+function formatEuros(amount: number | undefined | null): string {
+  if (typeof amount !== "number" || Number.isNaN(amount)) return "—";
+  return EUR_FORMAT.format(amount);
 }
 
 function formatDate(iso: string | undefined | null): string {
