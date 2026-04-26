@@ -7,6 +7,8 @@ import {
   userCanAccessAdminSociosSection,
   userCanManageSociosActions,
 } from "@/lib/auth/admin";
+import { getSociosDemographicsStats } from "@/lib/admin/socios-demographics";
+import { SociosDemographicsCard } from "@/components/admin/SociosDemographicsCard";
 import { listUsersAndDrafts } from "@/lib/repositories/users";
 import type { UserRecord } from "@/types/models";
 
@@ -28,6 +30,7 @@ export default async function AdminUsersPage() {
   const users = await listUsersAndDrafts();
   const safe = users.map(stripPassword);
   const currentSafe = stripPassword(currentUser);
+  const sociosStats = getSociosDemographicsStats(safe);
 
   return (
     <div className="mx-auto w-full max-w-5xl px-4 py-10 lg:max-w-none lg:px-6 xl:px-8">
@@ -40,14 +43,7 @@ export default async function AdminUsersPage() {
             ← Admin
           </Link>
           <h1 className="mt-2 text-2xl font-semibold">Administración · Socios</h1>
-          <p className="mt-1 text-sm text-muted">
-            Listado: <code className="text-xs">canAccessAdminSocios</code>,{" "}
-            <code className="text-xs">canManageSociosActions</code> o{" "}
-            <code className="text-xs">canEditUserPermissions</code>. Activar,
-            entregas e import/export Excel:{" "}
-            <code className="text-xs">canManageSociosActions</code>. Editar
-            permisos: <code className="text-xs">canEditUserPermissions</code>.
-          </p>
+          <SociosDemographicsCard stats={sociosStats} />
         </div>
         {userCanManageSociosActions(currentUser) ? <AdminExcelActions /> : null}
       </div>

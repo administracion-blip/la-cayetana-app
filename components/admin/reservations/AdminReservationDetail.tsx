@@ -72,23 +72,15 @@ const CAN_ANULAR_DESDE_GESTION: ReadonlySet<ReservationStatus> = new Set([
 /** Misma cadencia que en `ReservationDetailView` (cliente) para alinear criterios. */
 const ADMIN_RESERVATION_POLL_MS = 15_000;
 
-/**
- * Plegable; abierto al cargar si la reserva ya incluye menús, y al guardar
- * el primer reparto pasa a abrirse (por `menuLineCount`).
- */
+/** Plegable; por defecto contraído (el equipo abre cuando quiera editar). */
 function MenuRepartoDetails({
   partySize,
-  menuLineCount,
   children,
 }: {
   partySize: number;
-  menuLineCount: number;
   children: ReactNode;
 }) {
-  const [open, setOpen] = useState(() => menuLineCount > 0);
-  useEffect(() => {
-    if (menuLineCount > 0) setOpen(true);
-  }, [menuLineCount]);
+  const [open, setOpen] = useState(false);
   return (
     <details
       className="group rounded-2xl border border-border bg-white shadow-sm"
@@ -203,7 +195,6 @@ export function AdminReservationDetail({
         <MenuRepartoDetails
           key={state.reservation.reservationId}
           partySize={state.reservation.partySize}
-          menuLineCount={state.reservation.menuLineItems?.length ?? 0}
         >
           <AdminReservationMenuEditor
             embed
@@ -612,6 +603,19 @@ function Summary({
               );
             })}
           </ul>
+          <div className="mt-2 flex items-center justify-between gap-2 border-t border-border/60 pt-2">
+            <span className="text-xs font-semibold uppercase tracking-wide text-muted">
+              Total
+            </span>
+            <span className="text-sm font-semibold tabular-nums text-foreground">
+              {formatAmountEuros(
+                reservation.menuLineItems.reduce(
+                  (sum, l) => sum + l.priceCents * l.quantity,
+                  0,
+                ),
+              )}
+            </span>
+          </div>
         </div>
       ) : null}
       {reservation.notes ? (

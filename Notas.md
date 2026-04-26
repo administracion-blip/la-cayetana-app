@@ -4,6 +4,8 @@ C:\Proyectos\igp-grupo-paripe
 
 npm run dev
 npm run api
+npm run build
+
 
 //PARA ABRIR CON EXPO GO
 npm run start
