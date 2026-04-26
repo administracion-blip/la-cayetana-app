@@ -2,6 +2,11 @@
 
 import type { ReactNode } from "react";
 import { PackageCheckIcon } from "@/components/icons/PackageCheckIcon";
+import {
+  bonoDeliveryBlockMessage,
+  bonoDeliveryBlockReason,
+  userHasPaidThisYear,
+} from "@/lib/membership";
 import type { SafeUser } from "./AdminUsersClient";
 
 type Props = {
@@ -125,9 +130,9 @@ export function UserQuickSheet({
 }: Props) {
   if (!user) return null;
 
-  const currentYear = new Date().getUTCFullYear();
-  const paidThisYear =
-    user.paidAt && new Date(user.paidAt).getUTCFullYear() === currentYear;
+  const paidThisYear = userHasPaidThisYear(user);
+  const blockReason = bonoDeliveryBlockReason(user);
+  const canDeliver = blockReason === null;
   const delivered = user.deliveryStatus === "delivered";
 
   return (
@@ -237,7 +242,7 @@ export function UserQuickSheet({
                   >
                     {busy ? "…" : "Deshacer entrega"}
                   </button>
-                ) : (
+                ) : canDeliver ? (
                   <button
                     type="button"
                     disabled={busy}
@@ -253,7 +258,11 @@ export function UserQuickSheet({
                       </>
                     )}
                   </button>
-                )
+                ) : blockReason ? (
+                  <p className="w-full rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-center text-xs text-amber-900 sm:w-auto sm:max-w-xs">
+                    {bonoDeliveryBlockMessage(blockReason)}
+                  </p>
+                ) : null
               ) : null}
             </div>
           </footer>

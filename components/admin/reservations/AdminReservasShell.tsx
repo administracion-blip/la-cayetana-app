@@ -33,7 +33,10 @@ export function AdminReservasShell({ canEditConfig }: Props) {
   }, []);
 
   return (
-    <div className="mx-auto w-full min-w-0 max-w-6xl box-border px-3 py-4 sm:px-4 sm:py-6 md:px-5 md:py-8">
+    <div
+      className="mx-auto box-border w-full min-w-0 max-w-6xl px-3 py-4 sm:px-4 sm:py-6 md:px-5 md:py-8
+        lg:max-w-none lg:px-6 xl:px-8"
+    >
       <div
         className="mb-4 flex min-w-0 flex-col gap-4 sm:mb-6 md:flex-row md:items-start md:justify-between
           md:gap-6"

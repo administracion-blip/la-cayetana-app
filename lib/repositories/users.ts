@@ -19,6 +19,10 @@ import {
 } from "@/lib/constants";
 import { getDocClient } from "@/lib/dynamo";
 import { getEnv } from "@/lib/env";
+import {
+  bonoDeliveryBlockMessage,
+  bonoDeliveryBlockReason,
+} from "@/lib/membership";
 import type { UserRecord, UserSex, UserStatus } from "@/types/models";
 
 const EMAIL_GSI = "email-index";
@@ -804,6 +808,10 @@ export type AdminUserPatch = {
   name?: string;
   /** Cadena vacía elimina el atributo `phone` en Dynamo. */
   phone?: string | null;
+  /** Sexo declarado por el socio. `null` o cadena vacía elimina el atributo. */
+  sex?: UserSex | null;
+  /** Año de nacimiento. `null` elimina el atributo. */
+  birthYear?: number | null;
   status?: UserStatus;
   exportedToAgora?: boolean;
   isAdmin?: boolean;
@@ -824,6 +832,9 @@ export type AdminUserPatch = {
   canManageSociosActions?: boolean;
   canAccessAdminReservas?: boolean;
   canAccessAdminProgramacion?: boolean;
+  canInviteSocios?: boolean;
+  canEditSociosProfile?: boolean;
+  canDeactivateSocios?: boolean;
 };
 
 /** Actualiza campos editables desde el panel admin / import Excel (por `id` de usuario). */
@@ -851,6 +862,24 @@ export async function updateUserFieldsById(
       names["#phone"] = "phone";
       values[":phone"] = patch.phone.trim();
       setParts.push("#phone = :phone");
+    }
+  }
+  if (patch.sex !== undefined) {
+    if (patch.sex === null) {
+      removeAttrs.push("sex");
+    } else {
+      names["#sex"] = "sex";
+      values[":sex"] = patch.sex;
+      setParts.push("#sex = :sex");
+    }
+  }
+  if (patch.birthYear !== undefined) {
+    if (patch.birthYear === null) {
+      removeAttrs.push("birthYear");
+    } else {
+      names["#by"] = "birthYear";
+      values[":by"] = patch.birthYear;
+      setParts.push("#by = :by");
     }
   }
   if (patch.status !== undefined) {
@@ -933,6 +962,26 @@ export async function updateUserFieldsById(
   sectionAccess("canAccessAdminReservas");
   sectionAccess("canAccessAdminProgramacion");
 
+  type SociosManagementKey =
+    | "canInviteSocios"
+    | "canEditSociosProfile"
+    | "canDeactivateSocios";
+  const sociosMgmt = (attr: SociosManagementKey) => {
+    const v = patch[attr];
+    if (v === undefined) return;
+    const nk = attr.replace(/[^a-zA-Z0-9]/g, "_");
+    if (v === true) {
+      names[`#m_${nk}`] = attr;
+      values[`:m_${nk}`] = true;
+      setParts.push(`#m_${nk} = :m_${nk}`);
+    } else {
+      removeAttrs.push(attr);
+    }
+  };
+  sociosMgmt("canInviteSocios");
+  sociosMgmt("canEditSociosProfile");
+  sociosMgmt("canDeactivateSocios");
+
   if (setParts.length === 0 && removeAttrs.length === 0) return;
 
   let updateExpression = "";
@@ -989,10 +1038,14 @@ export async function markUserBonoDelivered(input: {
   if (!user) {
     throw new BonoDeliveryError("Usuario no encontrado");
   }
-  if (user.status !== "active") {
-    throw new BonoDeliveryError(
-      "Solo se puede marcar entrega en socios activos",
-    );
+  // El bono pertenece al ejercicio en curso y exige un cobro registrado:
+  //  - inactivo / pendiente de pago → primero hay que activar.
+  //  - sin renovar este año → primero hay que renovar (y eso reabre la entrega).
+  //  - sin importe registrado → cortesía/invitación o activación sin importe;
+  //    si se ha cobrado, registra el importe antes de entregar.
+  const blockReason = bonoDeliveryBlockReason(user);
+  if (blockReason) {
+    throw new BonoDeliveryError(bonoDeliveryBlockMessage(blockReason));
   }
   const doc = getDocClient();
   const { USERS_TABLE_NAME } = getEnv();
@@ -1061,6 +1114,201 @@ export async function markUserBonoPending(input: {
   );
   const updated = res.Attributes as UserRecord | undefined;
   if (!updated) throw new BonoDeliveryError("No se pudo deshacer la entrega");
+  return updated;
+}
+
+export type CreateInvitedUserInput = {
+  /** Email ya normalizado (lowercase + trim). */
+  email: string;
+  name: string;
+  passwordHash: string;
+  phone: string;
+  sex: UserSex;
+  birthYear: number;
+  /** Id del admin que envió la invitación (auditoría). */
+  invitedByUserId: string;
+};
+
+/**
+ * Alta de un socio aceptando una invitación: no pasa por Stripe.
+ *
+ *  - Asigna `membershipId` del rango Stripe (`CY1000+`) usando el contador.
+ *  - Estado `active` desde el primer momento, con `paidAt = now` y un
+ *    importe `paidAmount = 0` (cortesía / invitación) para que aparezca
+ *    correctamente en listados/exportes.
+ *  - Si ya existe un usuario con el mismo email, lanza
+ *    {@link EmailAlreadyActiveError} (caduca el flujo: el admin debería
+ *    activar/renovar manualmente en lugar de invitar).
+ *  - Si existe un draft `pending_payment` no caducado, también lanza
+ *    {@link PendingRegistrationExistsError} para no pisar un alta legítima.
+ */
+export async function createInvitedUser(
+  input: CreateInvitedUserInput,
+): Promise<UserRecord> {
+  const doc = getDocClient();
+  const { USERS_TABLE_NAME } = getEnv();
+  const email = normalizeEmail(input.email);
+
+  const existing = await getUserByEmail(email);
+  if (existing) {
+    if (existing.status === "active" || existing.status === "inactive") {
+      throw new EmailAlreadyActiveError();
+    }
+    if (existing.status === "pending_payment") {
+      const ttl = existing.expiresAt ?? 0;
+      const now = epochSeconds(new Date());
+      if (ttl > now) {
+        throw new PendingRegistrationExistsError();
+      }
+      // Caducado: limpiamos para poder ocupar el email con el invitado.
+      const cleanup: Array<{
+        Delete: { TableName: string; Key: Record<string, string> };
+      }> = [
+        { Delete: { TableName: USERS_TABLE_NAME, Key: { id: existing.id } } },
+        {
+          Delete: {
+            TableName: USERS_TABLE_NAME,
+            Key: { id: emailLockId(email) },
+          },
+        },
+      ];
+      if (existing.stripeSessionId) {
+        cleanup.push({
+          Delete: {
+            TableName: USERS_TABLE_NAME,
+            Key: { id: stripeSessionLockId(existing.stripeSessionId) },
+          },
+        });
+      }
+      try {
+        await doc.send(new TransactWriteCommand({ TransactItems: cleanup }));
+      } catch (e) {
+        console.warn("[users] no se pudo limpiar draft caducado para invite", e);
+      }
+    }
+  }
+
+  const seq = await incrementMembershipCounter();
+  const membershipId = formatMembershipId(seq);
+
+  const id = crypto.randomUUID();
+  const nowIso = new Date().toISOString();
+  const user: UserRecord = {
+    id,
+    entityType: USER_ENTITY_TYPE,
+    membershipId,
+    name: input.name.trim(),
+    email,
+    passwordHash: input.passwordHash,
+    phone: input.phone.trim(),
+    sex: input.sex,
+    birthYear: input.birthYear,
+    status: "active",
+    createdAt: nowIso,
+    paidAt: nowIso,
+    paidAmount: 0,
+    paidCurrency: "EUR",
+    deliveryStatus: "pending",
+    exportedToAgora: false,
+    welcomeEmailSent: false,
+    isAdmin: false,
+    activatedAt: nowIso,
+    activatedByUserId: input.invitedByUserId,
+  };
+
+  try {
+    await doc.send(
+      new TransactWriteCommand({
+        TransactItems: [
+          {
+            Put: {
+              TableName: USERS_TABLE_NAME,
+              Item: {
+                id: emailLockId(email),
+                entityType: "LOCK",
+                userId: id,
+              },
+              ConditionExpression: "attribute_not_exists(id)",
+            },
+          },
+          {
+            Put: {
+              TableName: USERS_TABLE_NAME,
+              Item: { ...user },
+              ConditionExpression: "attribute_not_exists(id)",
+            },
+          },
+        ],
+      }),
+    );
+  } catch (err: unknown) {
+    const name =
+      err && typeof err === "object" && "name" in err
+        ? String((err as { name: string }).name)
+        : "";
+    if (name === "TransactionCanceledException") {
+      throw new EmailAlreadyActiveError();
+    }
+    throw err;
+  }
+
+  return user;
+}
+
+export class DeactivateUserError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "DeactivateUserError";
+  }
+}
+
+/**
+ * Baja lógica de un socio activo: cambia `status` a `inactive` y registra
+ * quién/cuándo lo desactivó. No borra el registro ni el `membershipId`,
+ * para que se pueda reactivar en el futuro por el flujo manual normal.
+ */
+export async function deactivateUserById(input: {
+  userId: string;
+  adminUserId: string;
+}): Promise<UserRecord> {
+  const user = await getUserById(input.userId);
+  if (!user) {
+    throw new DeactivateUserError("Usuario no encontrado");
+  }
+  if (user.status === "inactive") return user;
+  if (user.status !== "active") {
+    throw new DeactivateUserError(
+      "Solo se puede dar de baja socios activos",
+    );
+  }
+  const doc = getDocClient();
+  const { USERS_TABLE_NAME } = getEnv();
+  const nowIso = new Date().toISOString();
+  const res = await doc.send(
+    new UpdateCommand({
+      TableName: USERS_TABLE_NAME,
+      Key: { id: input.userId },
+      UpdateExpression:
+        "SET #status = :inactive, #dByAt = :now, #dByWho = :who",
+      ConditionExpression: "attribute_exists(id) AND #status = :active",
+      ExpressionAttributeNames: {
+        "#status": "status",
+        "#dByAt": "deactivatedAt",
+        "#dByWho": "deactivatedByUserId",
+      },
+      ExpressionAttributeValues: {
+        ":active": "active" satisfies UserStatus,
+        ":inactive": "inactive" satisfies UserStatus,
+        ":now": nowIso,
+        ":who": input.adminUserId,
+      },
+      ReturnValues: "ALL_NEW",
+    }),
+  );
+  const updated = res.Attributes as UserRecord | undefined;
+  if (!updated) {
+    throw new DeactivateUserError("No se pudo dar de baja al socio");
+  }
   return updated;
 }
 

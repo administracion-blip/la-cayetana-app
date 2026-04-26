@@ -13,7 +13,7 @@ export default async function AdminReservationsConfigPage() {
   const user = await getReservationStaffOrRedirect();
   const permissions = permissionsForUser(user);
   return (
-    <div className="mx-auto max-w-4xl px-4 py-8">
+    <div className="mx-auto w-full max-w-4xl px-4 py-8 lg:max-w-none lg:px-6 xl:px-8">
       <div className="mb-6">
         <Link
           href="/admin/reservas"

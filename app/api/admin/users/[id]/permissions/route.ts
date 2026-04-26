@@ -19,6 +19,9 @@ const bodySchema = z.object({
   canManageSociosActions: z.boolean(),
   canAccessAdminReservas: z.boolean(),
   canAccessAdminProgramacion: z.boolean(),
+  canInviteSocios: z.boolean(),
+  canEditSociosProfile: z.boolean(),
+  canDeactivateSocios: z.boolean(),
 });
 
 /**
@@ -94,6 +97,9 @@ export async function POST(
     canManageSociosActions: b.canManageSociosActions,
     canAccessAdminReservas: b.canAccessAdminReservas,
     canAccessAdminProgramacion: b.canAccessAdminProgramacion,
+    canInviteSocios: b.canInviteSocios,
+    canEditSociosProfile: b.canEditSociosProfile,
+    canDeactivateSocios: b.canDeactivateSocios,
   });
 
   return NextResponse.json({
@@ -112,6 +118,9 @@ export async function POST(
       canManageSociosActions: b.canManageSociosActions,
       canAccessAdminReservas: b.canAccessAdminReservas,
       canAccessAdminProgramacion: b.canAccessAdminProgramacion,
+      canInviteSocios: b.canInviteSocios,
+      canEditSociosProfile: b.canEditSociosProfile,
+      canDeactivateSocios: b.canDeactivateSocios,
     },
   });
 }

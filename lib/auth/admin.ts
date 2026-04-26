@@ -9,6 +9,9 @@ import type { UserRecord } from "@/types/models";
  *   - `canAccessAdmin`             entrada al hub de administración.
  *   - `canAccessAdminSocios`       ver el panel de socios.
  *   - `canManageSociosActions`     activar/renovar, entregas, Excel import/export.
+ *   - `canInviteSocios`            enviar invitaciones de alta sin Stripe.
+ *   - `canEditSociosProfile`       editar ficha (nombre, teléfono, sexo, año).
+ *   - `canDeactivateSocios`        dar de baja (status → `inactive`).
  *   - `canEditUserPermissions`     editar permisos de cualquier socio.
  *   - `canAccessAdminReservas`     entrar al tablero de reservas.
  *   - `canAccessAdminProgramacion` entrar a programación (también para acciones).
@@ -27,12 +30,27 @@ export function userCanAccessAdminSociosSection(user: UserRecord): boolean {
     user.isAdmin === true ||
     user.canAccessAdminSocios === true ||
     user.canManageSociosActions === true ||
-    user.canEditUserPermissions === true
+    user.canEditUserPermissions === true ||
+    user.canInviteSocios === true ||
+    user.canEditSociosProfile === true ||
+    user.canDeactivateSocios === true
   );
 }
 
 export function userCanManageSociosActions(user: UserRecord): boolean {
   return user.isAdmin === true || user.canManageSociosActions === true;
+}
+
+export function userCanInviteSocios(user: UserRecord): boolean {
+  return user.isAdmin === true || user.canInviteSocios === true;
+}
+
+export function userCanEditSociosProfile(user: UserRecord): boolean {
+  return user.isAdmin === true || user.canEditSociosProfile === true;
+}
+
+export function userCanDeactivateSocios(user: UserRecord): boolean {
+  return user.isAdmin === true || user.canDeactivateSocios === true;
 }
 
 export function userCanAccessAdminReservasSection(user: UserRecord): boolean {
@@ -137,4 +155,25 @@ export async function requireUserPermissionsEditorForApi(): Promise<
   return loadSessionUserOr401Or403(
     (u) => u.isAdmin === true || u.canEditUserPermissions === true,
   );
+}
+
+/** API: enviar invitaciones de alta de socios. */
+export async function requireInviteSociosForApi(): Promise<
+  { ok: true; user: UserRecord } | { ok: false; response: NextResponse }
+> {
+  return loadSessionUserOr401Or403(userCanInviteSocios);
+}
+
+/** API: editar ficha de socio (nombre, teléfono, sexo, año). */
+export async function requireEditSociosProfileForApi(): Promise<
+  { ok: true; user: UserRecord } | { ok: false; response: NextResponse }
+> {
+  return loadSessionUserOr401Or403(userCanEditSociosProfile);
+}
+
+/** API: dar de baja a un socio (status → inactive). */
+export async function requireDeactivateSociosForApi(): Promise<
+  { ok: true; user: UserRecord } | { ok: false; response: NextResponse }
+> {
+  return loadSessionUserOr401Or403(userCanDeactivateSocios);
 }

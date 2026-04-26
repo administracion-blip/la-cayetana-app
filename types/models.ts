@@ -88,6 +88,10 @@ export interface UserRecord {
   activatedByUserId?: string;
   /** Fecha ISO de la última activación manual (flujo manual). */
   activatedAt?: string;
+  /** Fecha ISO en la que un admin dio de baja al socio (status → `inactive`). */
+  deactivatedAt?: string;
+  /** Id del admin que dio de baja al socio (auditoría). */
+  deactivatedByUserId?: string;
   /**
    * Ruleta de la Suerte: si es `true`, este socio puede validar canjes en
    * taquilla (su QR se escanea desde la app del ganador para marcar el premio
@@ -140,6 +144,48 @@ export interface UserRecord {
    * Acceso a Administración · Programación (`/admin/programacion`).
    */
   canAccessAdminProgramacion?: boolean;
+  /**
+   * Permite enviar invitaciones de alta a nuevos socios desde el panel.
+   * El invitado completa sus datos sin pasar por Stripe y queda en
+   * `active` automáticamente al aceptar la invitación.
+   */
+  canInviteSocios?: boolean;
+  /**
+   * Permite editar la ficha de un socio (nombre, teléfono, sexo, año de
+   * nacimiento). El email y la contraseña se cambian por flujos propios.
+   */
+  canEditSociosProfile?: boolean;
+  /**
+   * Permite dar de baja a un socio: cambia su estado a `inactive` sin
+   * borrar el registro. La reactivación pasa por el flujo manual normal.
+   */
+  canDeactivateSocios?: boolean;
+}
+
+/**
+ * Token de un solo uso para invitar a un nuevo socio (alta sin Stripe).
+ * Vive en la misma tabla Dynamo que los usuarios.
+ *
+ * Se genera al pulsar "Invitar socio" desde admin: se persiste hasheado
+ * (SHA-256) y se envía el token en claro por email; el invitado lo abre
+ * en `/invitacion?token=…`, completa sus datos y queda activo.
+ */
+export interface MemberInviteRecord {
+  /** `INVITE#<sha256(token)>` */
+  id: string;
+  entityType: "MEMBER_INVITE";
+  email: string;
+  /** Nombre (opcional) precargado por el admin al invitar. */
+  name?: string;
+  /** Teléfono (opcional) precargado por el admin al invitar. */
+  phone?: string;
+  /** Id del usuario que envió la invitación (auditoría). */
+  invitedByUserId: string;
+  /** Cuándo caduca (ISO). */
+  expiresAt: string;
+  /** TTL nativo de DynamoDB para limpiar la invitación. */
+  ttlEpoch: number;
+  createdAt: string;
 }
 
 /** Token de un solo uso para restablecer contraseña (misma tabla Dynamo que users). */

@@ -10,9 +10,16 @@ import {
 } from "react";
 import type { CSSProperties } from "react";
 import { QrScanIcon } from "@/components/icons/QrScanIcon";
+import {
+  bonoDeliveryBlockReason,
+  userCanReceiveBonoDelivery,
+  userHasPaidThisYear,
+} from "@/lib/membership";
 import type { UserRecord } from "@/types/models";
 import { AdminAuthDeniedDialog } from "./AdminAuthDeniedDialog";
 import { AdminConfirmDialog } from "./AdminConfirmDialog";
+import { EditUserProfileModal } from "./EditUserProfileModal";
+import { InviteMemberModal } from "./InviteMemberModal";
 import { QrScannerModal } from "./QrScannerModal";
 import { ScanNoMatchDialog } from "./ScanNoMatchDialog";
 import { UserPermissionsModal } from "./UserPermissionsModal";
@@ -35,12 +42,22 @@ type PendingConfirm =
   | { kind: "activate"; user: SafeUser }
   | { kind: "delivery"; user: SafeUser }
   | { kind: "bulkDeliver"; users: SafeUser[] }
-  | { kind: "bulkActivate"; users: SafeUser[] };
+  | { kind: "bulkActivate"; users: SafeUser[] }
+  | { kind: "deactivate"; user: SafeUser };
 
-/** Activo con bono pendiente de entregar (misma condición que “Marcar entregado” por fila). */
+type InviteFeedback = {
+  email: string;
+  emailSent: boolean;
+  inviteUrl?: string;
+} | null;
+
+/**
+ * Activo, con renovación al día (paidAt en el año en curso) y bono aún
+ * pendiente. Es la misma condición del botón “Marcar entregado” por fila.
+ */
 function canBulkDeliver(u: SafeUser): boolean {
   return (
-    u.status === "active" &&
+    userCanReceiveBonoDelivery(u) &&
     (u.deliveryStatus ?? "pending") === "pending"
   );
 }
@@ -49,10 +66,7 @@ function canBulkDeliver(u: SafeUser): boolean {
 function canBulkActivate(u: SafeUser): boolean {
   if (u.status === "pending_payment" || u.status === "inactive") return true;
   if (u.status === "active") {
-    const y = new Date().getUTCFullYear();
-    const paidThisYear =
-      u.paidAt && new Date(u.paidAt).getUTCFullYear() === y;
-    return !paidThisYear;
+    return !userHasPaidThisYear(u);
   }
   return false;
 }
@@ -70,7 +84,8 @@ type SortKey =
   | "isAdmin"
   | "canValidatePrizes"
   | "createdAt"
-  | "permissions";
+  | "permissions"
+  | "userActions";
 
 const COLUMNS: { key: SortKey; label: string }[] = [
   { key: "membershipId", label: "Socio" },
@@ -86,6 +101,7 @@ const COLUMNS: { key: SortKey; label: string }[] = [
   { key: "canValidatePrizes", label: "Validador" },
   { key: "createdAt", label: "Alta" },
   { key: "permissions", label: "Permisos" },
+  { key: "userActions", label: "Acciones" },
 ];
 
 const DEFAULT_WIDTHS: Record<SortKey, number> = {
@@ -102,6 +118,7 @@ const DEFAULT_WIDTHS: Record<SortKey, number> = {
   canValidatePrizes: 100,
   createdAt: 108,
   permissions: 80,
+  userActions: 150,
 };
 
 const SEX_LABEL: Record<string, string> = {
@@ -194,6 +211,8 @@ function compareUsers(
       );
     case "permissions":
       return (permissionScore(a) - permissionScore(b)) * mul;
+    case "userActions":
+      return 0;
     default:
       return 0;
   }
@@ -214,6 +233,12 @@ export function AdminUsersClient({
   const canEditPermissionsUI =
     currentUser.isAdmin === true ||
     currentUser.canEditUserPermissions === true;
+  const canInvite =
+    currentUser.isAdmin === true || currentUser.canInviteSocios === true;
+  const canEditProfile =
+    currentUser.isAdmin === true || currentUser.canEditSociosProfile === true;
+  const canDeactivate =
+    currentUser.isAdmin === true || currentUser.canDeactivateSocios === true;
 
   const [q, setQ] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("membershipId");
@@ -240,11 +265,26 @@ export function AdminUsersClient({
     () => new Set(),
   );
   const [permissionsUser, setPermissionsUser] = useState<SafeUser | null>(null);
+  const [editProfileUser, setEditProfileUser] = useState<SafeUser | null>(null);
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [inviteFeedback, setInviteFeedback] = useState<InviteFeedback>(null);
   const selectAllCheckboxRef = useRef<HTMLInputElement>(null);
 
+  const visibleColumns = useMemo(
+    () =>
+      COLUMNS.filter((c) => {
+        if (c.key === "permissions" && !canEditPermissionsUI) return false;
+        if (c.key === "userActions" && !canEditProfile && !canDeactivate) {
+          return false;
+        }
+        return true;
+      }),
+    [canEditPermissionsUI, canEditProfile, canDeactivate],
+  );
+
   const sortColumnLabel = useMemo(
-    () => COLUMNS.find((c) => c.key === sortKey)?.label ?? sortKey,
-    [sortKey],
+    () => visibleColumns.find((c) => c.key === sortKey)?.label ?? sortKey,
+    [visibleColumns, sortKey],
   );
 
   const stickyLeftBase = canManageUsersFully
@@ -605,6 +645,58 @@ export function AdminUsersClient({
     [runActivate, clearSelection],
   );
 
+  const runDeactivate = useCallback(
+    async (user: SafeUser): Promise<boolean> => {
+      setError(null);
+      setPendingId(user.id);
+      try {
+        const res = await fetch(
+          `/api/admin/users/${encodeURIComponent(user.id)}/deactivate`,
+          { method: "POST" },
+        );
+        const data = (await res.json().catch(() => null)) as
+          | {
+              ok?: boolean;
+              error?: string;
+              user?: {
+                id: string;
+                status: "active" | "inactive" | "pending_payment";
+                deactivatedAt?: string | null;
+                deactivatedByUserId?: string | null;
+              };
+            }
+          | null;
+        if (!res.ok || !data?.ok) {
+          setError(data?.error ?? "No se pudo dar de baja al socio");
+          return false;
+        }
+        startTransition(() => {
+          setRows((prev) =>
+            prev.map((u) =>
+              u.id === user.id
+                ? {
+                    ...u,
+                    status: data.user?.status ?? "inactive",
+                    deactivatedAt: data.user?.deactivatedAt ?? undefined,
+                    deactivatedByUserId:
+                      data.user?.deactivatedByUserId ?? undefined,
+                  }
+                : u,
+            ),
+          );
+        });
+        return true;
+      } catch (e) {
+        console.error(e);
+        setError("Error de red al dar de baja al socio");
+        return false;
+      } finally {
+        setPendingId(null);
+      }
+    },
+    [],
+  );
+
   const handleScanResult = useCallback(
     (raw: string) => {
       setScannerOpen(false);
@@ -743,9 +835,7 @@ export function AdminUsersClient({
         }
         // active: botón "Renovar" = misma activación manual, refresca paidAt.
         const busy = pendingId === u.id;
-        const currentYear = new Date().getUTCFullYear();
-        const paidThisYear =
-          u.paidAt && new Date(u.paidAt).getUTCFullYear() === currentYear;
+        const paidThisYear = userHasPaidThisYear(u);
         if (!canManageUsersFully) {
           return (
             <span className="inline-flex items-center rounded-full bg-emerald-50 px-1.5 py-0 text-[10px] font-medium leading-tight text-emerald-700 ring-1 ring-inset ring-emerald-200">
@@ -784,6 +874,8 @@ export function AdminUsersClient({
         }
         const delivered = u.deliveryStatus === "delivered";
         const busy = pendingId === u.id;
+        const blockReason = bonoDeliveryBlockReason(u);
+        const canDeliver = blockReason === null;
         if (!canManageUsersFully) {
           return delivered ? (
             <span
@@ -845,7 +937,7 @@ export function AdminUsersClient({
               >
                 {busy ? "…" : "Deshacer"}
               </button>
-            ) : (
+            ) : canDeliver ? (
               <button
                 type="button"
                 disabled={busy}
@@ -855,6 +947,20 @@ export function AdminUsersClient({
               >
                 {busy ? "…" : "Marcar entregado"}
               </button>
+            ) : blockReason === "no_payment_amount" ? (
+              <span
+                className="text-[10px] leading-tight text-muted"
+                title="No hay importe registrado en este pago. Edita el importe (o renueva con el cobro) antes de entregar el bono."
+              >
+                Sin importe
+              </span>
+            ) : (
+              <span
+                className="text-[10px] leading-tight text-muted"
+                title="El socio no ha renovado este año. Renueva primero."
+              >
+                Renueva primero
+              </span>
             )}
           </div>
         );
@@ -899,6 +1005,41 @@ export function AdminUsersClient({
           </button>
         );
       }
+      case "userActions": {
+        if (!canEditProfile && !canDeactivate) {
+          return <span className="text-muted">—</span>;
+        }
+        const busy = pendingId === u.id;
+        const isInactive = u.status === "inactive";
+        return (
+          <div className="flex flex-wrap items-center gap-1">
+            {canEditProfile ? (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => setEditProfileUser(u)}
+                className="rounded border border-border bg-white px-1.5 py-0.5 text-[10px] font-medium leading-tight text-foreground hover:bg-zinc-50 disabled:opacity-50"
+                title="Editar nombre, teléfono, sexo y año de nacimiento"
+              >
+                Ficha
+              </button>
+            ) : null}
+            {canDeactivate && !isInactive ? (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() =>
+                  setPendingConfirm({ kind: "deactivate", user: u })
+                }
+                className="rounded border border-rose-200 bg-rose-50 px-1.5 py-0.5 text-[10px] font-medium leading-tight text-rose-800 hover:bg-rose-100 disabled:opacity-50"
+                title="Marcar como inactivo (baja lógica). Se puede reactivar."
+              >
+                Baja
+              </button>
+            ) : null}
+          </div>
+        );
+      }
       default:
         return null;
     }
@@ -928,6 +1069,19 @@ export function AdminUsersClient({
               >
                 <QrScanIcon className="h-5 w-5 text-teal-700" />
                 Escanear
+              </button>
+            ) : null}
+            {canInvite ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setInviteFeedback(null);
+                  setInviteOpen(true);
+                }}
+                className="inline-flex min-h-[48px] shrink-0 items-center gap-2 rounded-xl border border-brand/30 bg-brand px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+                title="Enviar invitación a un nuevo socio (sin Stripe)"
+              >
+                + Invitar
               </button>
             ) : null}
             <input
@@ -1072,6 +1226,41 @@ export function AdminUsersClient({
         </div>
       ) : null}
 
+      {inviteFeedback ? (
+        <div className="mb-4 flex flex-wrap items-start gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+          <div className="min-w-0 flex-1">
+            {inviteFeedback.emailSent ? (
+              <p>
+                Invitación enviada a{" "}
+                <strong className="font-mono">{inviteFeedback.email}</strong>.
+                El enlace caduca en 7 días.
+              </p>
+            ) : (
+              <>
+                <p>
+                  Se ha generado la invitación para{" "}
+                  <strong className="font-mono">{inviteFeedback.email}</strong>{" "}
+                  pero no se pudo enviar el email. Copia el enlace y compártelo
+                  manualmente:
+                </p>
+                {inviteFeedback.inviteUrl ? (
+                  <code className="mt-1 block break-all rounded bg-white/70 px-2 py-1 text-xs">
+                    {inviteFeedback.inviteUrl}
+                  </code>
+                ) : null}
+              </>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={() => setInviteFeedback(null)}
+            className="shrink-0 rounded-md border border-emerald-300 bg-white px-2 py-1 text-xs font-medium text-emerald-900 hover:bg-emerald-100"
+          >
+            Cerrar
+          </button>
+        </div>
+      ) : null}
+
       <div className="mb-3 lg:hidden">
         <div className="overflow-hidden rounded-xl border border-border bg-card">
           <button
@@ -1122,7 +1311,7 @@ export function AdminUsersClient({
                 }}
                 className="min-w-0 flex-1 rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground outline-none ring-brand focus:ring-2 sm:max-w-xs"
               >
-                {COLUMNS.map(({ key, label }) => (
+                {visibleColumns.map(({ key, label }) => (
                   <option key={key} value={key}>
                     {label}
                   </option>
@@ -1227,6 +1416,30 @@ export function AdminUsersClient({
                 Editar permisos
               </button>
             ) : null}
+            {canEditProfile || canDeactivate ? (
+              <div className="mt-2 flex flex-wrap gap-2">
+                {canEditProfile ? (
+                  <button
+                    type="button"
+                    onClick={() => setEditProfileUser(u)}
+                    className="flex-1 rounded-xl border border-border bg-white py-2 text-xs font-medium text-foreground hover:bg-zinc-50"
+                  >
+                    Editar ficha
+                  </button>
+                ) : null}
+                {canDeactivate && u.status !== "inactive" ? (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setPendingConfirm({ kind: "deactivate", user: u })
+                    }
+                    className="flex-1 rounded-xl border border-rose-200 bg-rose-50 py-2 text-xs font-medium text-rose-800 hover:bg-rose-100"
+                  >
+                    Dar de baja
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
           </article>
         ))}
       </div>
@@ -1256,7 +1469,7 @@ export function AdminUsersClient({
                   />
                 </th>
               ) : null}
-              {COLUMNS.map(({ key, label }) => {
+              {visibleColumns.map(({ key, label }) => {
                 const isStickySocio = key === "membershipId";
                 const isStickyName = key === "name";
                 const stickyTh =
@@ -1331,7 +1544,7 @@ export function AdminUsersClient({
                     />
                   </td>
                 ) : null}
-                {COLUMNS.map(({ key }) => {
+                {visibleColumns.map(({ key }) => {
                   const isStickySocio = key === "membershipId";
                   const isStickyName = key === "name";
                   const stickyTd =
@@ -1531,6 +1744,61 @@ export function AdminUsersClient({
           socio(s) según corresponda (alta pendiente de pago, inactivo o renovación
           anual).
         </AdminConfirmDialog>
+      ) : pendingConfirm?.kind === "deactivate" ? (
+        <AdminConfirmDialog
+          title="Dar de baja al socio"
+          confirmLabel="Dar de baja"
+          onCancel={() => setPendingConfirm(null)}
+          onConfirm={() => {
+            const u = pendingConfirm.user;
+            setPendingConfirm(null);
+            window.setTimeout(() => {
+              void runDeactivate(u);
+            }, 0);
+          }}
+        >
+          Se marcará a{" "}
+          <strong className="text-foreground">{pendingConfirm.user.name}</strong>{" "}
+          como <strong className="text-foreground">inactivo</strong>. No podrá
+          iniciar sesión, pero el registro y su número de socio (
+          <span className="font-mono">{pendingConfirm.user.membershipId ?? "—"}</span>
+          ) se conservan. Puedes reactivarlo más adelante.
+        </AdminConfirmDialog>
+      ) : null}
+
+      {inviteOpen && canInvite ? (
+        <InviteMemberModal
+          onClose={() => setInviteOpen(false)}
+          onInvited={(info) => {
+            setInviteOpen(false);
+            setInviteFeedback(info);
+          }}
+        />
+      ) : null}
+
+      {editProfileUser && canEditProfile ? (
+        <EditUserProfileModal
+          user={editProfileUser}
+          onClose={() => setEditProfileUser(null)}
+          onSaved={(updated) => {
+            startTransition(() => {
+              setRows((prev) =>
+                prev.map((row) =>
+                  row.id === updated.id
+                    ? {
+                        ...row,
+                        name: updated.name,
+                        phone: updated.phone ?? undefined,
+                        sex: updated.sex ?? undefined,
+                        birthYear: updated.birthYear ?? undefined,
+                      }
+                    : row,
+                ),
+              );
+            });
+            setEditProfileUser(null);
+          }}
+        />
       ) : null}
 
       {authDeniedOpen ? (

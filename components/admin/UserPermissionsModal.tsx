@@ -16,6 +16,9 @@ export type UserPermissionsPayload = {
   canAccessAdmin: boolean;
   canAccessAdminSocios: boolean;
   canManageSociosActions: boolean;
+  canInviteSocios: boolean;
+  canEditSociosProfile: boolean;
+  canDeactivateSocios: boolean;
   canAccessAdminReservas: boolean;
   canAccessAdminProgramacion: boolean;
 };
@@ -31,6 +34,9 @@ const ALL_OFF: UserPermissionsPayload = {
   canAccessAdmin: false,
   canAccessAdminSocios: false,
   canManageSociosActions: false,
+  canInviteSocios: false,
+  canEditSociosProfile: false,
+  canDeactivateSocios: false,
   canAccessAdminReservas: false,
   canAccessAdminProgramacion: false,
 };
@@ -47,6 +53,9 @@ export function userToPermissionsPayload(u: SafeUser): UserPermissionsPayload {
     canAccessAdmin: u.canAccessAdmin === true,
     canAccessAdminSocios: u.canAccessAdminSocios === true,
     canManageSociosActions: u.canManageSociosActions === true,
+    canInviteSocios: u.canInviteSocios === true,
+    canEditSociosProfile: u.canEditSociosProfile === true,
+    canDeactivateSocios: u.canDeactivateSocios === true,
     canAccessAdminReservas: u.canAccessAdminReservas === true,
     canAccessAdminProgramacion: u.canAccessAdminProgramacion === true,
   };
@@ -71,6 +80,18 @@ const ROW_META: Record<
   canManageSociosActions: {
     label: "Acciones sobre socios",
     hint: "Activar/renovar, marcar como entregado y deshacer entrega, importar y exportar Excel.",
+  },
+  canInviteSocios: {
+    label: "Invitar nuevos socios",
+    hint: "Envía invitaciones por email para dar de alta socios sin pasar por Stripe.",
+  },
+  canEditSociosProfile: {
+    label: "Editar ficha de socios",
+    hint: "Permite cambiar nombre, teléfono, sexo y año de nacimiento. El email y la contraseña tienen flujos propios.",
+  },
+  canDeactivateSocios: {
+    label: "Dar de baja socios",
+    hint: "Cambia el estado del socio a inactivo (baja lógica). El registro se conserva para poder reactivarlo.",
   },
   canAccessAdminReservas: {
     label: "Acceso a Administración · Reservas",
@@ -122,6 +143,9 @@ const PERMISSION_SECTIONS: {
       "canEditUserPermissions",
       "canAccessAdminSocios",
       "canManageSociosActions",
+      "canInviteSocios",
+      "canEditSociosProfile",
+      "canDeactivateSocios",
       "canAccessAdminReservas",
       "canAccessAdminProgramacion",
     ],
@@ -178,6 +202,9 @@ export function UserPermissionsModal({ user, onClose, onSaved }: Props) {
       canAccessAdmin: true,
       canAccessAdminSocios: true,
       canManageSociosActions: true,
+      canInviteSocios: true,
+      canEditSociosProfile: true,
+      canDeactivateSocios: true,
       canAccessAdminReservas: true,
       canAccessAdminProgramacion: true,
     }),
@@ -244,6 +271,9 @@ export function UserPermissionsModal({ user, onClose, onSaved }: Props) {
         canAccessAdmin: flagOrUndef(form.canAccessAdmin),
         canAccessAdminSocios: flagOrUndef(form.canAccessAdminSocios),
         canManageSociosActions: flagOrUndef(form.canManageSociosActions),
+        canInviteSocios: flagOrUndef(form.canInviteSocios),
+        canEditSociosProfile: flagOrUndef(form.canEditSociosProfile),
+        canDeactivateSocios: flagOrUndef(form.canDeactivateSocios),
         canAccessAdminReservas: flagOrUndef(form.canAccessAdminReservas),
         canAccessAdminProgramacion: flagOrUndef(
           form.canAccessAdminProgramacion,

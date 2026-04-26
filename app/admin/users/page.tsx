@@ -30,7 +30,7 @@ export default async function AdminUsersPage() {
   const currentSafe = stripPassword(currentUser);
 
   return (
-    <div className="mx-auto max-w-5xl px-4 py-10">
+    <div className="mx-auto w-full max-w-5xl px-4 py-10 lg:max-w-none lg:px-6 xl:px-8">
       <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <Link

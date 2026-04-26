@@ -94,3 +94,67 @@ export const eventSchema = z.object({
 });
 
 export const eventPatchSchema = eventSchema.partial();
+
+/**
+ * Cuerpo del POST `/api/admin/users/invite`. El admin solo aporta el email
+ * y, opcionalmente, nombre y teléfono para personalizar el correo. El resto
+ * de campos los rellena el invitado al aceptar la invitación.
+ */
+export const inviteMemberSchema = z.object({
+  email: z.string().email(),
+  name: z.string().trim().min(1).max(120).optional().or(z.literal("")),
+  phone: z.string().trim().min(6).max(30).optional().or(z.literal("")),
+});
+
+/**
+ * Cuerpo del POST `/api/auth/accept-invite`. El invitado completa los datos
+ * obligatorios del alta (sin Stripe) y elige una contraseña.
+ */
+export const acceptInviteSchema = z
+  .object({
+    token: z.string().min(64).max(128),
+    name: z.string().trim().min(1).max(120),
+    phone: z.string().trim().min(6).max(30),
+    sex: z.enum(USER_SEX_VALUES),
+    birthYear: z.coerce
+      .number()
+      .int()
+      .min(MIN_BIRTH_YEAR, { message: "Año fuera de rango" })
+      .max(MAX_BIRTH_YEAR, { message: "Debes ser mayor de 18 años" }),
+    password: z.string().min(8).max(128),
+    confirmPassword: z.string().min(8).max(128),
+    acceptTerms: z.literal(true, {
+      message: "Debes aceptar las condiciones",
+    }),
+  })
+  .refine((v) => v.password === v.confirmPassword, {
+    path: ["confirmPassword"],
+    message: "Las contraseñas no coinciden",
+  });
+
+/**
+ * Cuerpo del PATCH `/api/admin/users/:id`. Edición restringida a campos de
+ * ficha (no toca permisos ni email). Usar `null` para borrar `phone`.
+ */
+export const adminUserProfilePatchSchema = z
+  .object({
+    name: z.string().trim().min(1).max(120).optional(),
+    phone: z
+      .union([z.string().trim().min(6).max(30), z.literal(""), z.null()])
+      .optional(),
+    sex: z.enum(USER_SEX_VALUES).nullable().optional(),
+    birthYear: z
+      .union([
+        z.coerce
+          .number()
+          .int()
+          .min(MIN_BIRTH_YEAR, { message: "Año fuera de rango" })
+          .max(MAX_BIRTH_YEAR, { message: "Debes ser mayor de 18 años" }),
+        z.null(),
+      ])
+      .optional(),
+  })
+  .refine((v) => Object.keys(v).length > 0, {
+    message: "Indica al menos un campo a modificar",
+  });
+
