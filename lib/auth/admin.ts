@@ -15,6 +15,15 @@ import type { UserRecord } from "@/types/models";
  *   - `canEditUserPermissions`     editar permisos de cualquier socio.
  *   - `canAccessAdminReservas`     entrar al tablero de reservas.
  *   - `canAccessAdminProgramacion` entrar a programación (también para acciones).
+ *   - `canEditRouletteConfig` (o `isAdmin` legacy) habilita la configuración
+ *     global de la ruleta (`/admin/roulette/config`), vía
+ *     {@link userCanManageRouletteConfig}. Es independiente de
+ *     `canEditUserPermissions`: un usuario puede editar la ruleta sin tocar
+ *     permisos de socios y viceversa.
+ *   - `canViewRouletteOps` (o `canEditRouletteConfig` / `isAdmin`) habilita
+ *     el panel de operación `/admin/roulette` (registro de tiradas, premios
+ *     y rascas por jornada). Es estrictamente de **lectura**; quien edite la
+ *     configuración tiene siempre la lectura implícita.
  *
  * `isAdmin` es **legacy**: cuando es `true` se considera equivalente a
  * tenerlos todos. Las cuentas nuevas no deberían recibirlo: el modal ya no
@@ -53,6 +62,26 @@ export function userCanDeactivateSocios(user: UserRecord): boolean {
   return user.isAdmin === true || user.canDeactivateSocios === true;
 }
 
+/**
+ * Configuración global de la Ruleta de la Suerte (temporada, horarios, stock…).
+ * Mismo criterio que {@link requireRouletteAdminForApi}.
+ */
+export function userCanManageRouletteConfig(user: UserRecord): boolean {
+  return user.isAdmin === true || user.canEditRouletteConfig === true;
+}
+
+/**
+ * Acceso al panel de operación `/admin/roulette` (registro de tiradas,
+ * premios y rascas por jornada). Solo lectura. Quien tenga
+ * {@link userCanManageRouletteConfig} también puede ver el registro
+ * implícitamente, sin necesidad de marcar el flag específico.
+ */
+export function userCanViewRouletteOps(user: UserRecord): boolean {
+  return (
+    userCanManageRouletteConfig(user) || user.canViewRouletteOps === true
+  );
+}
+
 export function userCanAccessAdminReservasSection(user: UserRecord): boolean {
   return (
     user.isAdmin === true ||
@@ -77,7 +106,9 @@ export function userCanAccessAdminArea(user: UserRecord): boolean {
     userCanAccessAdmin(user) ||
     userCanAccessAdminSociosSection(user) ||
     userCanAccessAdminReservasSection(user) ||
-    userCanAccessAdminProgramacionSection(user)
+    userCanAccessAdminProgramacionSection(user) ||
+    userCanManageRouletteConfig(user) ||
+    userCanViewRouletteOps(user)
   );
 }
 
@@ -134,6 +165,19 @@ export async function getAdminProgramacionUserOrRedirect(): Promise<UserRecord> 
   );
 }
 
+/** Página `/admin/roulette/config`: solo super-admins de ruleta. */
+export async function getRouletteAdminUserOrRedirect(): Promise<UserRecord> {
+  return loadSessionUserOrRedirect(userCanManageRouletteConfig, "/admin");
+}
+
+/**
+ * Página `/admin/roulette` (operación, solo lectura): admite tanto a quienes
+ * editan la configuración como a quienes solo tienen el flag de lectura.
+ */
+export async function getRouletteOpsUserOrRedirect(): Promise<UserRecord> {
+  return loadSessionUserOrRedirect(userCanViewRouletteOps, "/admin");
+}
+
 /** API: acciones de socios (activar, entregas, Excel). */
 export async function requireSociosActionsForApi(): Promise<
   { ok: true; user: UserRecord } | { ok: false; response: NextResponse }
@@ -176,4 +220,29 @@ export async function requireDeactivateSociosForApi(): Promise<
   { ok: true; user: UserRecord } | { ok: false; response: NextResponse }
 > {
   return loadSessionUserOr401Or403(userCanDeactivateSocios);
+}
+
+/**
+ * API: configuración global de la Ruleta de la Suerte (temporada, horarios,
+ * stock, tasas, shadow…). Limitada a `isAdmin` legacy o a usuarios con el
+ * flag granular `canEditRouletteConfig`. No depende de los permisos de
+ * socios: es un eje propio.
+ */
+export async function requireRouletteAdminForApi(): Promise<
+  { ok: true; user: UserRecord } | { ok: false; response: NextResponse }
+> {
+  return loadSessionUserOr401Or403(userCanManageRouletteConfig);
+}
+
+/**
+ * API: registro de operación de ruleta (lectura, `/api/admin/roulette/cycles`).
+ * Acceso para `canViewRouletteOps`, `canEditRouletteConfig` o `isAdmin`. Es
+ * un endpoint **estrictamente de lectura**; las mutaciones se hacen a través
+ * de los flujos de socio (ruleta del usuario, validador de premios) o del
+ * config admin protegido por `requireRouletteAdminForApi`.
+ */
+export async function requireRouletteOpsForApi(): Promise<
+  { ok: true; user: UserRecord } | { ok: false; response: NextResponse }
+> {
+  return loadSessionUserOr401Or403(userCanViewRouletteOps);
 }

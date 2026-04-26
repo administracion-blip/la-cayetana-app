@@ -1,4 +1,5 @@
 import {
+  BatchGetCommand,
   GetCommand,
   PutCommand,
   QueryCommand,
@@ -112,6 +113,8 @@ export const DEFAULT_ROULETTE_CONFIG: Omit<
   consolationWindowSec: 20 * 60,
   consolationRewardType: "discount_1eur_drinks",
   consolationRewardLabel: DEFAULT_CONSOLATION_REWARD_LABEL,
+  seasonStartDate: null,
+  seasonEndDate: null,
 };
 
 // ─── Helpers de claves ────────────────────────────────────────────────────
@@ -203,6 +206,32 @@ export class RouletteClosedError extends RouletteError {
   }
 }
 
+/**
+ * Se lanza cuando un socio intenta tirar fuera de la temporada configurada
+ * (`seasonStartDate` / `seasonEndDate`). El `reason` permite distinguir si
+ * la temporada aún no ha comenzado (`before_season`) o ya ha terminado
+ * (`after_season`). `opensAt` apunta al primer instante (UTC, ISO) en el
+ * que la ruleta volverá a estar disponible (solo cuando `before_season`).
+ *
+ * El usuario shadow (CY1000) no se ve afectado por este control.
+ */
+export type RouletteSeasonReason = "before_season" | "after_season";
+
+export class RouletteSeasonClosedError extends RouletteError {
+  constructor(
+    public readonly reason: RouletteSeasonReason,
+    public readonly opensAt: string | null,
+  ) {
+    super(
+      "ROULETTE_SEASON_CLOSED",
+      reason === "before_season"
+        ? "La ruleta aún no está disponible esta temporada"
+        : "La ruleta ya no está disponible esta temporada",
+    );
+    this.name = "RouletteSeasonClosedError";
+  }
+}
+
 export class AlreadyHasActivePrizeError extends RouletteError {
   constructor() {
     super(
@@ -274,12 +303,28 @@ export interface RouletteStatus {
   shadow: boolean;
   /**
    * Si es `true`, la ruleta está cerrada por horario (ventana nocturna de
-   * descanso). El cliente debe bloquear el botón de girar y mostrar
-   * `opensAt`. Siempre `false` para el usuario shadow.
+   * descanso) o por estar fuera de temporada. El cliente debe bloquear el
+   * botón de girar y mostrar `opensAt`. Siempre `false` para el usuario
+   * shadow. Cuando es `true`, los campos `season*` indican si la causa es
+   * la temporada y permiten al cliente mostrar un mensaje específico.
    */
   closed: boolean;
   /** Instante UTC (ISO) en el que la ruleta volverá a abrirse, o `null`. */
   opensAt: string | null;
+  /** `true` si la fecha actual está fuera del rango de temporada. */
+  seasonClosed: boolean;
+  /**
+   * Motivo del cierre por temporada (cuando `seasonClosed === true`):
+   *  - `before_season` → la temporada empieza en el futuro.
+   *  - `after_season`  → la temporada ya terminó.
+   */
+  seasonReason: RouletteSeasonReason | null;
+  /**
+   * Instante UTC (ISO) en el que arranca la temporada
+   * (`seasonStartDate` a la `cycleStartHour` local). Solo significativo
+   * cuando `seasonReason === "before_season"`.
+   */
+  seasonOpensAt: string | null;
 }
 
 /**
@@ -410,6 +455,72 @@ export function isRouletteClosed(
   return { closed: true, opensAt: opensAtDate.toISOString() };
 }
 
+/**
+ * Indica si el instante `now` cae fuera del rango de temporada configurado
+ * (`seasonStartDate` / `seasonEndDate`). Comparación por fecha **local**
+ * (`yyyy-MM-dd` en `timezone`), ambas inclusivas.
+ *
+ *  - Si `seasonStartDate > hoyLocal` → `before_season` con `opensAt` apuntando
+ *    a `seasonStartDate` a la hora `cycleStartHour` (apertura del primer
+ *    ciclo de temporada).
+ *  - Si `seasonEndDate < hoyLocal` → `after_season` (sin `opensAt`).
+ *  - En cualquier otro caso (incluido cuando ambas son `null`) → no cerrado.
+ *
+ * Las fechas mal formadas se ignoran (equivalen a "sin límite") para que un
+ * dato corrupto en config nunca deje al usuario en limbo permanente.
+ */
+export interface RouletteSeasonStatus {
+  closed: boolean;
+  reason: RouletteSeasonReason | null;
+  opensAt: string | null;
+}
+
+const SEASON_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+export function isOutsideSeason(
+  now: Date,
+  config: Pick<
+    RouletteConfigRecord,
+    "timezone" | "cycleStartHour" | "seasonStartDate" | "seasonEndDate"
+  >,
+): RouletteSeasonStatus {
+  const { timezone, cycleStartHour } = config;
+  const local = getZonedParts(now, timezone);
+  const todayLocal = `${local.year}-${pad2(local.month)}-${pad2(local.day)}`;
+
+  const startRaw = config.seasonStartDate;
+  const endRaw = config.seasonEndDate;
+  const start =
+    typeof startRaw === "string" && SEASON_DATE_RE.test(startRaw)
+      ? startRaw
+      : null;
+  const end =
+    typeof endRaw === "string" && SEASON_DATE_RE.test(endRaw) ? endRaw : null;
+
+  if (start && todayLocal < start) {
+    const [sy, sm, sd] = start.split("-").map(Number);
+    const opensAtDate = zonedWallTimeToUtc(
+      sy,
+      sm,
+      sd,
+      cycleStartHour,
+      0,
+      0,
+      0,
+      timezone,
+    );
+    return {
+      closed: true,
+      reason: "before_season",
+      opensAt: opensAtDate.toISOString(),
+    };
+  }
+  if (end && todayLocal > end) {
+    return { closed: true, reason: "after_season", opensAt: null };
+  }
+  return { closed: false, reason: null, opensAt: null };
+}
+
 // ─── CONFIG: read / init / update ─────────────────────────────────────────
 
 function stockFromPartial(
@@ -502,26 +613,37 @@ export async function getOrInitConfig(): Promise<RouletteConfigRecord> {
   }
 }
 
+/**
+ * Patch admisible por {@link updateConfig}. Ojo con `dailyStock`: aceptamos
+ * un `Partial<PrizeStockMap>` (cada premio por separado) para permitir
+ * editar solo uno desde el admin sin tener que enviar todos. La fusión con
+ * los valores actuales la hace `stockFromPartial`.
+ */
+export type RouletteConfigPatch = Partial<
+  Pick<
+    RouletteConfigRecord,
+    | "cycleStartHour"
+    | "closedWindowStartHour"
+    | "closedWindowEndHour"
+    | "spinsPerCycle"
+    | "redeemWindowSec"
+    | "targetWinRate"
+    | "shadowMembershipId"
+    | "shadowWinRate"
+    | "timezone"
+    | "consolationEnabled"
+    | "consolationWindowSec"
+    | "consolationRewardLabel"
+    | "seasonStartDate"
+    | "seasonEndDate"
+  >
+> & {
+  dailyStock?: Partial<PrizeStockMap>;
+};
+
 export async function updateConfig(input: {
   adminUserId: string;
-  patch: Partial<
-    Pick<
-      RouletteConfigRecord,
-      | "cycleStartHour"
-      | "closedWindowStartHour"
-      | "closedWindowEndHour"
-      | "spinsPerCycle"
-      | "redeemWindowSec"
-      | "targetWinRate"
-      | "dailyStock"
-      | "shadowMembershipId"
-      | "shadowWinRate"
-      | "timezone"
-      | "consolationEnabled"
-      | "consolationWindowSec"
-      | "consolationRewardLabel"
-    >
-  >;
+  patch: RouletteConfigPatch;
 }): Promise<RouletteConfigRecord> {
   const current = await getOrInitConfig();
   const next: RouletteConfigRecord = {
@@ -605,6 +727,16 @@ export async function updateConfig(input: {
       ? {
           consolationRewardLabel: input.patch.consolationRewardLabel.trim(),
         }
+      : {}),
+    ...(input.patch.seasonStartDate === null ||
+    (typeof input.patch.seasonStartDate === "string" &&
+      SEASON_DATE_RE.test(input.patch.seasonStartDate))
+      ? { seasonStartDate: input.patch.seasonStartDate }
+      : {}),
+    ...(input.patch.seasonEndDate === null ||
+    (typeof input.patch.seasonEndDate === "string" &&
+      SEASON_DATE_RE.test(input.patch.seasonEndDate))
+      ? { seasonEndDate: input.patch.seasonEndDate }
       : {}),
     updatedAt: new Date().toISOString(),
     updatedByUserId: input.adminUserId,
@@ -1069,6 +1201,9 @@ export async function getStatusForUser(
       shadow: true,
       closed: false,
       opensAt: null,
+      seasonClosed: false,
+      seasonReason: null,
+      seasonOpensAt: null,
     };
   }
 
@@ -1089,7 +1224,16 @@ export async function getStatusForUser(
   const spinsUsed = userCycle?.spinsUsed ?? 0;
   const spinsRemaining = Math.max(0, config.spinsPerCycle - spinsUsed);
   const closedNow = isRouletteClosed(new Date(), config);
+  const seasonNow = isOutsideSeason(new Date(), config);
   const disabled = spinsRemaining === 0 && activePrize === null;
+  // Si la temporada está cerrada, "elevamos" `closed` y exponemos su
+  // `opensAt` para que clientes antiguos que solo leen `closed`/`opensAt`
+  // sigan mostrando un mensaje coherente. Los nuevos clientes pueden leer
+  // `season*` para mostrar un texto específico.
+  const closed = closedNow.closed || seasonNow.closed;
+  const opensAt = seasonNow.closed
+    ? seasonNow.opensAt
+    : closedNow.opensAt;
   return {
     cycleId: cycle.cycleId,
     spinsRemaining,
@@ -1098,8 +1242,11 @@ export async function getStatusForUser(
     activePrize,
     activeConsolation,
     shadow: false,
-    closed: closedNow.closed,
-    opensAt: closedNow.opensAt,
+    closed,
+    opensAt,
+    seasonClosed: seasonNow.closed,
+    seasonReason: seasonNow.reason,
+    seasonOpensAt: seasonNow.opensAt,
   };
 }
 
@@ -1215,6 +1362,15 @@ export async function runSpin(input: {
 
   if (isShadow) {
     return runShadowSpin({ user, config });
+  }
+
+  // Gate de temporada: si hoy está fuera del rango configurado, bloqueamos
+  // antes que cualquier otra comprobación para que el mensaje al cliente sea
+  // específico ("la temporada aún no ha empezado" vs "vuelve a las 13:00").
+  // No afecta a premios/rascas ya emitidos: su canje sigue su propio TTL.
+  const seasonNow = isOutsideSeason(new Date(), config);
+  if (seasonNow.closed && seasonNow.reason) {
+    throw new RouletteSeasonClosedError(seasonNow.reason, seasonNow.opensAt);
   }
 
   // Gate horario: fuera de la ventana operativa bloqueamos antes de tocar
@@ -1861,6 +2017,156 @@ export async function discardPrize(input: {
     prizeType: prize.prizeType,
     discardedAt: nowIso,
   };
+}
+
+// ─── Lectura agregada por ciclo (panel de operación) ─────────────────────
+//
+// Estos helpers son **solo lectura** y se usan desde el panel
+// `/admin/roulette` para construir el registro de tiradas / premios / rascas
+// del día. No mutan nada y, en particular, NO disparan caducidades: si un
+// premio está `awarded` con `expiresAt` ya vencido, se devuelve tal cual
+// (la UI lo etiqueta como "vencido"); el reaper de expiración corre por su
+// flujo habitual.
+
+/**
+ * Devuelve todas las tiradas reales del ciclo (`PK = CYCLE#cycleId`,
+ * `SK begins_with "SPIN#"`). Las tiradas shadow viven bajo `SHADOW#…`
+ * y por tanto **no** entran aquí — exactamente lo que queremos en el
+ * registro del backoffice.
+ */
+export async function listSpinsForCycle(
+  cycleId: string,
+): Promise<RouletteSpinRecord[]> {
+  const doc = getDocClient();
+  const { ROULETTE_TABLE_NAME } = getEnv();
+  const out: RouletteSpinRecord[] = [];
+  let startKey: Record<string, unknown> | undefined;
+  do {
+    const res = await doc.send(
+      new QueryCommand({
+        TableName: ROULETTE_TABLE_NAME,
+        KeyConditionExpression: "PK = :pk AND begins_with(SK, :sk)",
+        ExpressionAttributeValues: {
+          ":pk": cyclePk(cycleId),
+          ":sk": "SPIN#",
+        },
+        ExclusiveStartKey: startKey,
+      }),
+    );
+    for (const item of res.Items ?? []) {
+      if ((item as RouletteSpinRecord).entityType !== "ROULETTE_SPIN") continue;
+      out.push(item as RouletteSpinRecord);
+    }
+    startKey = res.LastEvaluatedKey;
+  } while (startKey);
+  return out;
+}
+
+/**
+ * Devuelve los `ROULETTE_USER_CYCLE` del ciclo. Necesario para descubrir qué
+ * socios obtuvieron rasca (`consolationId`) sin tener que hacer un GSI
+ * dedicado.
+ */
+export async function listUserCyclesForCycle(
+  cycleId: string,
+): Promise<RouletteUserCycleRecord[]> {
+  const doc = getDocClient();
+  const { ROULETTE_TABLE_NAME } = getEnv();
+  const out: RouletteUserCycleRecord[] = [];
+  let startKey: Record<string, unknown> | undefined;
+  do {
+    const res = await doc.send(
+      new QueryCommand({
+        TableName: ROULETTE_TABLE_NAME,
+        KeyConditionExpression: "PK = :pk AND begins_with(SK, :sk)",
+        ExpressionAttributeValues: {
+          ":pk": cyclePk(cycleId),
+          ":sk": "USER#",
+        },
+        ExclusiveStartKey: startKey,
+      }),
+    );
+    for (const item of res.Items ?? []) {
+      if ((item as RouletteUserCycleRecord).entityType !== "ROULETTE_USER_CYCLE") continue;
+      out.push(item as RouletteUserCycleRecord);
+    }
+    startKey = res.LastEvaluatedKey;
+  } while (startKey);
+  return out;
+}
+
+/** Lectura `BatchGetItem` por id (≤100 por petición, con reintentos). */
+export async function getPrizesByIds(
+  prizeIds: readonly string[],
+): Promise<Map<string, RoulettePrizeRecord>> {
+  return batchGetByPk<RoulettePrizeRecord>(
+    prizeIds,
+    (id) => prizePk(id),
+    "ROULETTE_PRIZE",
+    (r) => r.prizeId,
+  );
+}
+
+/** Lectura `BatchGetItem` por id (≤100 por petición, con reintentos). */
+export async function getConsolationsByIds(
+  consolationIds: readonly string[],
+): Promise<Map<string, RouletteConsolationRecord>> {
+  return batchGetByPk<RouletteConsolationRecord>(
+    consolationIds,
+    (id) => consolationPk(id),
+    "ROULETTE_CONSOLATION",
+    (r) => r.consolationId,
+  );
+}
+
+/** Lectura del meta del ciclo para componer KPIs (read-only). */
+export async function getCycleMetaPublic(
+  cycleId: string,
+): Promise<RouletteCycleRecord | null> {
+  return getCycleMeta(cycleId);
+}
+
+async function batchGetByPk<T extends { entityType: string }>(
+  ids: readonly string[],
+  pkOf: (id: string) => string,
+  expectedEntity: T["entityType"],
+  idOf: (item: T) => string,
+): Promise<Map<string, T>> {
+  const out = new Map<string, T>();
+  const unique = Array.from(
+    new Set(ids.filter((id) => typeof id === "string" && id.length > 0)),
+  );
+  if (unique.length === 0) return out;
+  const doc = getDocClient();
+  const { ROULETTE_TABLE_NAME } = getEnv();
+  const CHUNK = 100;
+  for (let i = 0; i < unique.length; i += CHUNK) {
+    const slice = unique.slice(i, i + CHUNK);
+    let pending: { PK: string; SK: string }[] = slice.map((id) => ({
+      PK: pkOf(id),
+      SK: "META",
+    }));
+    while (pending.length > 0) {
+      const res = await doc.send(
+        new BatchGetCommand({
+          RequestItems: {
+            [ROULETTE_TABLE_NAME]: { Keys: pending },
+          },
+        }),
+      );
+      const items = res.Responses?.[ROULETTE_TABLE_NAME] ?? [];
+      for (const item of items) {
+        if (!item || (item as T).entityType !== expectedEntity) continue;
+        const record = item as T;
+        out.set(idOf(record), record);
+      }
+      const unprocessed = res.UnprocessedKeys?.[ROULETTE_TABLE_NAME]?.Keys as
+        | { PK: string; SK: string }[]
+        | undefined;
+      pending = unprocessed && unprocessed.length > 0 ? unprocessed : [];
+    }
+  }
+  return out;
 }
 
 // ─── Re-exports útiles ────────────────────────────────────────────────────

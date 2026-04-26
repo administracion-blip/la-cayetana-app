@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { hashPassword } from "@/lib/auth/password";
+import { hashPassword, verifyPassword } from "@/lib/auth/password";
 import { isCarnetPurchaseClosed } from "@/lib/carnet-purchase-deadline";
 import { normalizeEmail } from "@/lib/constants";
 import { getEnv } from "@/lib/env";
@@ -15,6 +15,7 @@ import {
   getUserByEmail,
   PendingRegistrationExistsError,
   prepareRenewal,
+  refreshPendingRegistration,
   UserAlreadyPaidThisYearError,
 } from "@/lib/repositories/users";
 import { registrationStartSchema } from "@/lib/validation";
@@ -146,6 +147,49 @@ export async function POST(request: Request) {
         },
         { status: 403 },
       );
+    }
+
+    // Reanudar pago pendiente: si el usuario abortó el pago en Stripe (refresh,
+    // cierra pestaña, sin cobertura…) tenemos un draft `pending_payment` con
+    // su email durante PENDING_USER_TTL_SECONDS. En ese plazo, si vuelve a
+    // `/registro` y demuestra ser él (mismo email + misma contraseña), no le
+    // bloqueamos: refrescamos el TTL del draft y le devolvemos otra vez el
+    // Payment Link. Si la contraseña no coincide, devolvemos el mismo 409
+    // neutral que el flujo normal (no enumera estado del email frente a
+    // "draft" vs "activo").
+    if (existing && existing.status === "pending_payment") {
+      const ttl = existing.expiresAt ?? 0;
+      const nowSec = Math.floor(Date.now() / 1000);
+      if (ttl > nowSec) {
+        const passwordOk =
+          typeof existing.passwordHash === "string" &&
+          existing.passwordHash.length > 0
+            ? await verifyPassword(password, existing.passwordHash)
+            : false;
+        if (passwordOk) {
+          const refreshed = await refreshPendingRegistration({
+            userId: existing.id,
+            name,
+            phone,
+            sex,
+            birthYear,
+          });
+          return NextResponse.json({
+            url: paymentLink,
+            userId: refreshed.id,
+            resumed: true,
+          });
+        }
+        return NextResponse.json(
+          {
+            error:
+              "Ya hay un registro asociado a ese email. Si es tuyo, inicia sesión o usa la opción de recuperar contraseña.",
+          },
+          { status: 409 },
+        );
+      }
+      // TTL caducado: dejamos que createPendingUser limpie el draft viejo
+      // (incluido el emailLock) y cree uno nuevo.
     }
 
     const passwordHash = await hashPassword(password);

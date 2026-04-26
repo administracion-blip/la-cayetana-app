@@ -1,8 +1,17 @@
 /** Contador atómico de carnets en la tabla de usuarios */
 export const MEMBERSHIP_COUNTER_ID = "SYSTEM_MEMBERSHIP_COUNTER";
 
-/** Duración del preregistro pendiente de pago antes de expirar (24 horas). */
-export const PENDING_USER_TTL_SECONDS = 60 * 60 * 24;
+/**
+ * Duración del preregistro pendiente de pago antes de expirar.
+ *
+ * Se ha bajado a 30 min para reducir la fricción cuando el usuario aborta el
+ * pago en Stripe (refresh, sin conexión, cierra pestaña…). Si vuelve a
+ * `/registro` con el mismo email + misma contraseña, el endpoint
+ * `registration/start` "reanuda" el draft y le devuelve el Payment Link en
+ * lugar de bloquear el correo durante 24 h. Pasados los 30 min, el draft se
+ * considera caducado y la siguiente alta lo sobreescribe.
+ */
+export const PENDING_USER_TTL_SECONDS = 60 * 30;
 
 export function emailLockId(normalizedEmail: string): string {
   return `LOCK_EMAIL#${normalizedEmail}`;

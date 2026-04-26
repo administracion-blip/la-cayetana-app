@@ -165,6 +165,8 @@ function permissionScore(u: SafeUser): number {
   if (u.canAccessAdminReservas) n++;
   if (u.canAccessAdminProgramacion) n++;
   if (u.canValidatePrizes) n++;
+  if (u.canEditRouletteConfig) n++;
+  if (u.canViewRouletteOps) n++;
   if (u.canManageReservations) n++;
   if (u.canReplyReservationChats) n++;
   if (u.canEditReservationConfig) n++;

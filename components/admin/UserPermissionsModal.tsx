@@ -7,6 +7,8 @@ type SafeUser = Omit<UserRecord, "passwordHash">;
 
 export type UserPermissionsPayload = {
   canValidatePrizes: boolean;
+  canEditRouletteConfig: boolean;
+  canViewRouletteOps: boolean;
   canManageReservations: boolean;
   canReplyReservationChats: boolean;
   canEditReservationConfig: boolean;
@@ -25,6 +27,8 @@ export type UserPermissionsPayload = {
 
 const ALL_OFF: UserPermissionsPayload = {
   canValidatePrizes: false,
+  canEditRouletteConfig: false,
+  canViewRouletteOps: false,
   canManageReservations: false,
   canReplyReservationChats: false,
   canEditReservationConfig: false,
@@ -44,6 +48,8 @@ const ALL_OFF: UserPermissionsPayload = {
 export function userToPermissionsPayload(u: SafeUser): UserPermissionsPayload {
   return {
     canValidatePrizes: u.canValidatePrizes === true,
+    canEditRouletteConfig: u.canEditRouletteConfig === true,
+    canViewRouletteOps: u.canViewRouletteOps === true,
     canManageReservations: u.canManageReservations === true,
     canReplyReservationChats: u.canReplyReservationChats === true,
     canEditReservationConfig: u.canEditReservationConfig === true,
@@ -106,6 +112,14 @@ const ROW_META: Record<
     hint: "Muestra el carnet para validar un premio de la ruleta.",
     needsActive: true,
   },
+  canEditRouletteConfig: {
+    label: "Configurar la ruleta",
+    hint: "Acceso a /admin/roulette/config: temporada, horarios, stock, probabilidades y consolación.",
+  },
+  canViewRouletteOps: {
+    label: "Ver registro de la ruleta",
+    hint: "Solo lectura: tiradas, premios y rascas por jornada en /admin/roulette. No permite editar la configuración ni mutar premios.",
+  },
   canManageReservations: {
     label: "Gestionar reservas",
     hint: "Tablero, estados, reprogramar, anular.",
@@ -153,8 +167,13 @@ const PERMISSION_SECTIONS: {
   {
     id: "ruleta",
     title: "Ruleta",
-    subtitle: "Validación de premios en caseta",
-    keys: ["canValidatePrizes"],
+    subtitle:
+      "Validación en caseta, registro de operación y configuración global",
+    keys: [
+      "canValidatePrizes",
+      "canViewRouletteOps",
+      "canEditRouletteConfig",
+    ],
   },
   {
     id: "reservas",
@@ -193,6 +212,8 @@ export function UserPermissionsModal({ user, onClose, onSaved }: Props) {
   const allOn = useCallback(
     (): UserPermissionsPayload => ({
       canValidatePrizes: active,
+      canEditRouletteConfig: true,
+      canViewRouletteOps: true,
       canManageReservations: true,
       canReplyReservationChats: true,
       canEditReservationConfig: true,
@@ -260,6 +281,8 @@ export function UserPermissionsModal({ user, onClose, onSaved }: Props) {
       onSaved({
         ...user,
         canValidatePrizes: flagOrUndef(form.canValidatePrizes),
+        canEditRouletteConfig: flagOrUndef(form.canEditRouletteConfig),
+        canViewRouletteOps: flagOrUndef(form.canViewRouletteOps),
         canManageReservations: flagOrUndef(form.canManageReservations),
         canReplyReservationChats: flagOrUndef(form.canReplyReservationChats),
         canEditReservationConfig: flagOrUndef(form.canEditReservationConfig),
@@ -348,8 +371,9 @@ export function UserPermissionsModal({ user, onClose, onSaved }: Props) {
             Cada permiso es independiente. <strong>Acceso al panel</strong> da
             entrada al hub; los flags por sección abren cada apartado.{" "}
             <strong>Acciones sobre socios</strong> habilita activar, entregas y
-            Excel. <strong>Editar permisos</strong> es la llave maestra.{" "}
-            <strong>Ruleta</strong> solo aplica a socios <strong>activos</strong>.
+            Excel. <strong>Editar permisos</strong> es la llave maestra. En{" "}
+            <strong>Ruleta</strong>, el validador solo aplica a socios{" "}
+            <strong>activos</strong>; configurar la ruleta es independiente.
           </p>
 
           {PERMISSION_SECTIONS.map((section) => {
@@ -369,20 +393,13 @@ export function UserPermissionsModal({ user, onClose, onSaved }: Props) {
                   <div className="flex shrink-0 flex-wrap gap-1">
                     <button
                       type="button"
-                      disabled={
-                        saving || (section.id === "ruleta" && !active)
-                      }
+                      disabled={saving}
                       onClick={() => {
                         setErr(null);
-                        if (section.id === "ruleta" && !active) return;
                         setSection(section.keys, true);
                       }}
                       className="rounded-md border border-border bg-white px-2 py-0.5 text-[11px] font-medium text-foreground hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
-                      title={
-                        section.id === "ruleta" && !active
-                          ? "Solo socios activos"
-                          : "Marcar todos en esta categoría"
-                      }
+                      title="Marcar todos en esta categoría"
                     >
                       Todos
                     </button>

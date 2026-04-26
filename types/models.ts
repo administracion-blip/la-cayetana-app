@@ -103,6 +103,22 @@ export interface UserRecord {
    * tiene por qué acceder al panel. Solo aplica a cuentas con `status = active`.
    */
   canValidatePrizes?: boolean;
+  /**
+   * Editar la configuración global de la Ruleta (`/admin/roulette/config`):
+   * temporada, horarios, stock, tasas y consolación. Independiente de
+   * `canValidatePrizes` (que solo habilita la taquilla) y de
+   * `canEditUserPermissions` (que ahora se queda solo para gestión de socios).
+   */
+  canEditRouletteConfig?: boolean;
+  /**
+   * Acceso de **solo lectura** al panel `/admin/roulette` (registro de tiradas,
+   * premios y rascas por jornada, con KPIs y stock). No permite editar la
+   * configuración ni mutar el estado de premios. Quien tenga
+   * `canEditRouletteConfig` (o `isAdmin` legacy) ya puede ver el registro
+   * implícitamente; este flag sirve para perfiles de "monitor" que no
+   * deben tocar la configuración.
+   */
+  canViewRouletteOps?: boolean;
   // ── Permisos granulares del módulo Reservas ────────────────────────────
   // Son campos opcionales para no romper compatibilidad con socios
   // existentes: `undefined` se trata como `false`. Solo tienen efecto si
@@ -382,6 +398,23 @@ export interface RouletteConfigRecord {
   consolationRewardType: ConsolationRewardType;
   /** Etiqueta visible al rascar (ej: "DESCUENTO DE 1€ EN TUS COPAS"). */
   consolationRewardLabel: string;
+  /**
+   * Fecha local de inicio de la temporada (`yyyy-MM-dd`, en `timezone`),
+   * inclusiva. Mientras la fecha local actual sea anterior, no se permiten
+   * tiradas y `getStatusForUser` devuelve `seasonClosed: true` con motivo
+   * `"before_season"`. `null` = sin límite de inicio (comportamiento previo).
+   *
+   * No afecta a premios/rascas ya emitidos (su `expiresAt` se respeta) ni al
+   * usuario shadow (CY1000), que se salta el control de temporada.
+   */
+  seasonStartDate?: string | null;
+  /**
+   * Fecha local de fin de la temporada (`yyyy-MM-dd`, en `timezone`),
+   * inclusiva. Pasada esa fecha local, no se permiten tiradas y
+   * `getStatusForUser` devuelve `seasonClosed: true` con motivo
+   * `"after_season"`. `null` = sin límite de fin.
+   */
+  seasonEndDate?: string | null;
   updatedAt: string;
   updatedByUserId?: string;
 }

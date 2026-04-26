@@ -6,6 +6,7 @@ import {
   PRIZE_LABEL,
   RouletteClosedError,
   RouletteError,
+  RouletteSeasonClosedError,
   runSpin,
 } from "@/lib/repositories/roulette";
 
@@ -45,6 +46,17 @@ export async function POST() {
     if (err instanceof AlreadyHasActivePrizeError) {
       return NextResponse.json(
         { error: err.message, code: err.code },
+        { status: 409 },
+      );
+    }
+    if (err instanceof RouletteSeasonClosedError) {
+      return NextResponse.json(
+        {
+          error: err.message,
+          code: err.code,
+          reason: err.reason,
+          opensAt: err.opensAt,
+        },
         { status: 409 },
       );
     }

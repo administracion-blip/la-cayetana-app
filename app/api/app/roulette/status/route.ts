@@ -37,6 +37,9 @@ function serializeStatus(status: RouletteStatus) {
     shadow: status.shadow,
     closed: status.closed,
     opensAt: status.opensAt,
+    seasonClosed: status.seasonClosed,
+    seasonReason: status.seasonReason,
+    seasonOpensAt: status.seasonOpensAt,
     activePrize,
     activeConsolation,
   };

@@ -8,6 +8,8 @@ import {
 
 const bodySchema = z.object({
   canValidatePrizes: z.boolean(),
+  canEditRouletteConfig: z.boolean(),
+  canViewRouletteOps: z.boolean(),
   canManageReservations: z.boolean(),
   canReplyReservationChats: z.boolean(),
   canEditReservationConfig: z.boolean(),
@@ -86,6 +88,8 @@ export async function POST(
 
   await updateUserFieldsById(id, {
     canValidatePrizes: b.canValidatePrizes,
+    canEditRouletteConfig: b.canEditRouletteConfig,
+    canViewRouletteOps: b.canViewRouletteOps,
     canManageReservations: b.canManageReservations,
     canReplyReservationChats: b.canReplyReservationChats,
     canEditReservationConfig: b.canEditReservationConfig,
@@ -107,6 +111,8 @@ export async function POST(
     user: {
       id,
       canValidatePrizes: b.canValidatePrizes,
+      canEditRouletteConfig: b.canEditRouletteConfig,
+      canViewRouletteOps: b.canViewRouletteOps,
       canManageReservations: b.canManageReservations,
       canReplyReservationChats: b.canReplyReservationChats,
       canEditReservationConfig: b.canEditReservationConfig,

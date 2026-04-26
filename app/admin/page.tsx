@@ -4,6 +4,8 @@ import {
   userCanAccessAdminProgramacionSection,
   userCanAccessAdminReservasSection,
   userCanAccessAdminSociosSection,
+  userCanManageRouletteConfig,
+  userCanViewRouletteOps,
 } from "@/lib/auth/admin";
 
 export const dynamic = "force-dynamic";
@@ -17,6 +19,12 @@ export default async function AdminHomePage() {
   const showSocios = userCanAccessAdminSociosSection(user);
   const showReservas = userCanAccessAdminReservasSection(user);
   const showProgramacion = userCanAccessAdminProgramacionSection(user);
+  // El hub `/admin/roulette` es de solo lectura, así que admite también al
+  // perfil "monitor" (`canViewRouletteOps`). La pestaña interna de
+  // configuración solo se enseña a quien tenga `canEditRouletteConfig`.
+  const showRoulette =
+    userCanViewRouletteOps(user) || userCanManageRouletteConfig(user);
+  const canEditRouletteConfig = userCanManageRouletteConfig(user);
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-12">
@@ -30,7 +38,7 @@ export default async function AdminHomePage() {
         </p>
       </div>
 
-      {!showSocios && !showReservas && !showProgramacion ? (
+      {!showSocios && !showReservas && !showProgramacion && !showRoulette ? (
         <div className="rounded-xl border border-border bg-card p-6 text-sm text-muted">
           Tienes acceso al panel pero todavía no se te ha asignado ninguna
           sección. Pídele a alguien con permiso de editar permisos que active
@@ -148,6 +156,44 @@ export default async function AdminHomePage() {
             </p>
             <span className="mt-auto text-sm font-medium text-brand group-hover:text-brand-hover">
               Abrir programación →
+            </span>
+          </Link>
+        ) : null}
+
+        {showRoulette ? (
+          <Link
+            href="/admin/roulette"
+            className="group flex flex-col gap-3 rounded-2xl border border-border bg-card p-6 shadow-sm transition hover:border-brand hover:shadow-md"
+          >
+            <div className="flex items-center gap-3">
+              <span
+                aria-hidden
+                className="flex h-11 w-11 items-center justify-center rounded-xl bg-brand/10 text-brand"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={1.8}
+                  className="h-6 w-6"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456zM16.894 20.567L16.5 21.75l-.394-1.183a2.25 2.25 0 00-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 001.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 001.423 1.423l1.183.394-1.183.394a2.25 2.25 0 00-1.423 1.423z"
+                  />
+                </svg>
+              </span>
+              <h2 className="text-lg font-semibold tracking-wide">RULETA</h2>
+            </div>
+            <p className="text-sm text-muted">
+              {canEditRouletteConfig
+                ? "Registro de tiradas, premios y rascas por jornada. Desde aquí puedes acceder también a la configuración (temporada, horario, stock y tasas)."
+                : "Registro de tiradas, premios y rascas por jornada (solo lectura)."}
+            </p>
+            <span className="mt-auto text-sm font-medium text-brand group-hover:text-brand-hover">
+              Abrir registro →
             </span>
           </Link>
         ) : null}

@@ -22,12 +22,20 @@ type RouletteStatusDto = {
   shadow: boolean;
   /**
    * `true` si la ruleta está fuera de la ventana horaria operativa
-   * (normalmente 04:00 → 13:00 hora local). El cliente bloquea el botón
-   * y muestra `opensAt`.
+   * (normalmente 04:00 → 13:00 hora local) **o** fuera de temporada
+   * (`seasonClosed`). El cliente bloquea el botón y muestra `opensAt`.
+   * Para diferenciar el motivo y poder dar un copy distinto, ver los
+   * campos `seasonClosed` / `seasonReason` / `seasonOpensAt`.
    */
   closed: boolean;
   /** Instante UTC (ISO) en el que la ruleta volverá a abrir, si procede. */
   opensAt: string | null;
+  /** `true` si la fecha actual está fuera de `seasonStartDate..seasonEndDate`. */
+  seasonClosed: boolean;
+  /** Motivo del cierre por temporada (cuando `seasonClosed === true`). */
+  seasonReason: "before_season" | "after_season" | null;
+  /** Instante UTC (ISO) en el que arranca la temporada, si `before_season`. */
+  seasonOpensAt: string | null;
   activePrize: {
     prizeId: string;
     prizeType: PrizeType;
@@ -62,6 +70,44 @@ function formatOpensAt(opensAt: string | null): string | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Formatea `opensAt` como una fecha legible para apertura de temporada
+ * (ej. "1 de junio"). Si la apertura es hoy o mañana, añade hora; si es
+ * más adelante, basta con "el día y mes". Devuelve `null` si el ISO es
+ * inválido.
+ */
+function formatSeasonOpensAt(opensAt: string | null): string | null {
+  if (!opensAt) return null;
+  const t = new Date(opensAt);
+  if (Number.isNaN(t.getTime())) return null;
+  try {
+    const diffMs = t.getTime() - Date.now();
+    const oneDayMs = 24 * 60 * 60 * 1000;
+    if (diffMs <= oneDayMs * 2) {
+      return new Intl.DateTimeFormat("es-ES", {
+        day: "numeric",
+        month: "long",
+        hour: "2-digit",
+        minute: "2-digit",
+        hourCycle: "h23",
+      }).format(t);
+    }
+    return new Intl.DateTimeFormat("es-ES", {
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+    }).format(t);
+  } catch {
+    return null;
+  }
+}
+
+/** Texto del botón / título cuando la temporada aún no ha empezado. */
+function abreElTemporadaLabel(seasonOpensAt: string | null): string {
+  const d = formatSeasonOpensAt(seasonOpensAt);
+  return d ? `Abre el ${d}` : "La ruleta aún no está disponible";
 }
 
 type SpinResultDto = {
@@ -240,6 +286,8 @@ function RouletteButton({
   const hasConsolation = !!status?.activeConsolation;
   const hasActivePrize = !!status?.activePrize;
   const isClosed = !!status?.closed;
+  const isSeasonClosed = !!status?.seasonClosed;
+  const seasonReason = status?.seasonReason ?? null;
   const opensAtLabel = formatOpensAt(status?.opensAt ?? null);
   // Si hay un rasca o premio pendiente tratamos el botón como activo aunque
   // `status.disabled` sea true por haber agotado tiradas o por ventana
@@ -252,19 +300,27 @@ function RouletteButton({
     ? "Ruleta de la Suerte"
     : hasConsolation
       ? "Regalo Seguro"
-      : "Juega a la Ruleta";
+      : isSeasonClosed && seasonReason === "before_season"
+        ? abreElTemporadaLabel(status?.seasonOpensAt ?? null)
+        : isSeasonClosed && seasonReason === "after_season"
+          ? "Temporada finalizada"
+          : "Juega a la Ruleta";
 
   const detailHint = status?.activePrize
     ? "Tienes un premio sin canjear"
     : hasConsolation
       ? "Tienes un regalo pendiente"
-      : isClosed
-        ? opensAtLabel
-          ? `Ruleta cerrada. Vuelve a las ${opensAtLabel}`
-          : "Ruleta cerrada. Vuelve al abrir la caseta"
-        : disabled && status
-          ? "Has gastado tus tiradas. Vuelve tras la próxima apertura"
-          : "";
+      : isSeasonClosed && seasonReason === "before_season"
+        ? ""
+        : isSeasonClosed && seasonReason === "after_season"
+          ? ""
+          : isClosed
+            ? opensAtLabel
+              ? `Ruleta cerrada. Vuelve a las ${opensAtLabel}`
+              : "Ruleta cerrada. Vuelve al abrir la caseta"
+            : disabled && status
+              ? "Has gastado tus tiradas. Vuelve tras la próxima apertura"
+              : "";
 
   const spinsHint =
     status && status.spinsRemaining !== null
@@ -818,10 +874,19 @@ export function RouletteHost() {
   // `opensAt` volvemos a pedir el status para que el botón se desbloquee
   // solo, sin que el usuario tenga que recargar. Margen de 2s para evitar
   // ganar la carrera al reloj del servidor.
+  //
+  // Si el cierre es por temporada (`seasonClosed`), `opensAt` puede estar
+  // a semanas/meses vista: programar un setTimeout tan largo no sirve
+  // (el usuario habrá cerrado la app antes) y `setTimeout` ni siquiera es
+  // fiable más allá de ~24,8 días (clamp a 32 bits). Solo programamos el
+  // refresh si el cierre es horario o si la apertura cae dentro de las
+  // próximas 24 horas.
   useEffect(() => {
     if (!status?.closed || !status.opensAt) return;
-    const ms = new Date(status.opensAt).getTime() - Date.now() + 2000;
-    if (!Number.isFinite(ms) || ms <= 0) {
+    const opensInMs = new Date(status.opensAt).getTime() - Date.now();
+    const ms = opensInMs + 2000;
+    if (!Number.isFinite(ms)) return;
+    if (ms <= 0) {
       // Ya habíamos pasado la hora de apertura cuando recibimos el status.
       // Sincronización con un sistema externo (nuestra API HTTP): la regla
       // `react-hooks/set-state-in-effect` es un falso positivo aquí.
@@ -829,11 +894,17 @@ export function RouletteHost() {
       void loadStatus();
       return;
     }
+    if (status.seasonClosed && opensInMs > 24 * 60 * 60 * 1000) return;
     const id = window.setTimeout(() => {
       void loadStatus();
     }, ms);
     return () => window.clearTimeout(id);
-  }, [status?.closed, status?.opensAt, loadStatus]);
+  }, [
+    status?.closed,
+    status?.opensAt,
+    status?.seasonClosed,
+    loadStatus,
+  ]);
 
   const closeAll = useCallback(() => {
     setView("closed");
@@ -1128,11 +1199,15 @@ export function RouletteHost() {
           >
             {spinning
               ? "Girando…"
-              : status?.closed
-                ? formatOpensAt(status.opensAt)
-                  ? `Abre a las ${formatOpensAt(status.opensAt)}`
-                  : "Ruleta cerrada"
-                : "Girar"}
+              : status?.seasonClosed && status.seasonReason === "before_season"
+                ? abreElTemporadaLabel(status.seasonOpensAt ?? null)
+                : status?.seasonClosed
+                  ? "Temporada finalizada"
+                  : status?.closed
+                    ? formatOpensAt(status.opensAt)
+                      ? `Abre a las ${formatOpensAt(status.opensAt)}`
+                      : "Ruleta cerrada"
+                    : "Girar"}
           </button>
         </div>
       </Modal>

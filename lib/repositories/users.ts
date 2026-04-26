@@ -1,4 +1,5 @@
 import {
+  BatchGetCommand,
   GetCommand,
   QueryCommand,
   ScanCommand,
@@ -245,6 +246,82 @@ export async function createPendingUser(
   }
 
   return user;
+}
+
+export type RefreshPendingRegistrationInput = {
+  userId: string;
+  /** Datos del formulario por si el usuario los corrigió al volver. */
+  name?: string;
+  phone?: string;
+  sex?: UserSex;
+  birthYear?: number;
+};
+
+/**
+ * Reanuda un preregistro `pending_payment` que aún no ha caducado:
+ *  - Refresca `expiresAt` (TTL completo desde ahora) para que el usuario tenga
+ *    margen suficiente para terminar el pago en Stripe.
+ *  - Actualiza opcionalmente nombre/teléfono/sexo/año de nacimiento por si los
+ *    corrigió al volver al formulario.
+ *  - NO actualiza `passwordHash`: la verificación de identidad ya la hizo el
+ *    endpoint comparando la contraseña en claro con el hash existente.
+ *
+ * El `ConditionExpression` exige seguir siendo `pending_payment` para no pisar
+ * un usuario que se haya activado (carrera con el webhook / activación manual).
+ */
+export async function refreshPendingRegistration(
+  input: RefreshPendingRegistrationInput,
+): Promise<UserRecord> {
+  const doc = getDocClient();
+  const { USERS_TABLE_NAME } = getEnv();
+
+  const names: Record<string, string> = {
+    "#status": "status",
+    "#exp": "expiresAt",
+  };
+  const values: Record<string, unknown> = {
+    ":pending": "pending_payment" satisfies UserStatus,
+    ":exp": epochSeconds(new Date()) + PENDING_USER_TTL_SECONDS,
+  };
+  const setParts: string[] = ["#exp = :exp"];
+
+  if (input.name && input.name.trim().length > 0) {
+    names["#name"] = "name";
+    values[":name"] = input.name.trim();
+    setParts.push("#name = :name");
+  }
+  if (input.phone && input.phone.trim().length > 0) {
+    names["#phone"] = "phone";
+    values[":phone"] = input.phone.trim();
+    setParts.push("#phone = :phone");
+  }
+  if (input.sex) {
+    names["#sex"] = "sex";
+    values[":sex"] = input.sex;
+    setParts.push("#sex = :sex");
+  }
+  if (typeof input.birthYear === "number") {
+    names["#by"] = "birthYear";
+    values[":by"] = input.birthYear;
+    setParts.push("#by = :by");
+  }
+
+  const res = await doc.send(
+    new UpdateCommand({
+      TableName: USERS_TABLE_NAME,
+      Key: { id: input.userId },
+      UpdateExpression: `SET ${setParts.join(", ")}`,
+      ConditionExpression: "attribute_exists(id) AND #status = :pending",
+      ExpressionAttributeNames: names,
+      ExpressionAttributeValues: values,
+      ReturnValues: "ALL_NEW",
+    }),
+  );
+  const updated = res.Attributes as UserRecord | undefined;
+  if (!updated) {
+    throw new Error("No se pudo reanudar el preregistro");
+  }
+  return updated;
 }
 
 /**
@@ -690,6 +767,51 @@ export async function getUserById(id: string): Promise<UserRecord | null> {
 }
 
 /**
+ * Lectura por lotes de usuarios por id. Útil para componer pantallas que
+ * combinan datos de varios módulos (p. ej. registro de la ruleta) sin caer
+ * en N llamadas `GetItem`. DynamoDB acepta hasta 100 ítems por
+ * `BatchGetItem`, así que partimos la entrada en chunks.
+ *
+ * Devuelve un mapa `{ id → UserRecord }` para los ids encontrados; los
+ * inexistentes simplemente se omiten. No diferencia `USER` de
+ * `DRAFT_REGISTRATION` salvo el filtro estándar de `entityType`.
+ */
+export async function getUsersByIdsBatch(
+  ids: readonly string[],
+): Promise<Map<string, UserRecord>> {
+  const result = new Map<string, UserRecord>();
+  const unique = Array.from(new Set(ids.filter((id) => typeof id === "string" && id.length > 0)));
+  if (unique.length === 0) return result;
+  const doc = getDocClient();
+  const { USERS_TABLE_NAME } = getEnv();
+  const CHUNK = 100;
+  for (let i = 0; i < unique.length; i += CHUNK) {
+    const slice = unique.slice(i, i + CHUNK);
+    let pending: { id: string }[] = slice.map((id) => ({ id }));
+    while (pending.length > 0) {
+      const res = await doc.send(
+        new BatchGetCommand({
+          RequestItems: {
+            [USERS_TABLE_NAME]: { Keys: pending },
+          },
+        }),
+      );
+      const items = res.Responses?.[USERS_TABLE_NAME] ?? [];
+      for (const item of items) {
+        if (!item || !isPersonEntity(item.entityType)) continue;
+        const record = item as UserRecord;
+        result.set(record.id, record);
+      }
+      const unprocessed = res.UnprocessedKeys?.[USERS_TABLE_NAME]?.Keys as
+        | { id: string }[]
+        | undefined;
+      pending = unprocessed && unprocessed.length > 0 ? unprocessed : [];
+    }
+  }
+  return result;
+}
+
+/**
  * Busca un socio por `membershipId` (ej. `CY0234`). Usa `Scan` filtrado porque
  * el membershipId se asigna una vez y no hay un GSI dedicado. Volumen esperado
  * bajo (unos miles de socios) y llamada puntual (canje de premios de ruleta).
@@ -832,6 +954,10 @@ export type AdminUserPatch = {
    * carnet en taquilla. `false` elimina el atributo.
    */
   canValidatePrizes?: boolean;
+  /** Ruleta: edición de `/admin/roulette/config`. `false` elimina el atributo. */
+  canEditRouletteConfig?: boolean;
+  /** Ruleta: lectura del registro `/admin/roulette`. `false` elimina el atributo. */
+  canViewRouletteOps?: boolean;
   /** Módulo reservas: `false` elimina el atributo (equivale a desactivar). */
   canManageReservations?: boolean;
   canReplyReservationChats?: boolean;
@@ -916,6 +1042,24 @@ export async function updateUserFieldsById(
       setParts.push("#cvp = :cvp");
     } else {
       removeAttrs.push("canValidatePrizes");
+    }
+  }
+  if (patch.canEditRouletteConfig !== undefined) {
+    if (patch.canEditRouletteConfig === true) {
+      names["#cERC"] = "canEditRouletteConfig";
+      values[":cERC"] = true;
+      setParts.push("#cERC = :cERC");
+    } else {
+      removeAttrs.push("canEditRouletteConfig");
+    }
+  }
+  if (patch.canViewRouletteOps !== undefined) {
+    if (patch.canViewRouletteOps === true) {
+      names["#cVRO"] = "canViewRouletteOps";
+      values[":cVRO"] = true;
+      setParts.push("#cVRO = :cVRO");
+    } else {
+      removeAttrs.push("canViewRouletteOps");
     }
   }
   type ResPermKey =
