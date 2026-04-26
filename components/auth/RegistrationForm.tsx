@@ -1,7 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { PrivacyPolicyModal } from "@/components/auth/PrivacyPolicyModal";
+import {
+  isCaptchaEnabledOnClient,
+  TurnstileField,
+} from "@/components/security/TurnstileField";
 import { MAX_BIRTH_YEAR, MIN_BIRTH_YEAR } from "@/lib/validation";
 
 const SEX_OPTIONS: { value: "male" | "female" | "prefer_not_to_say"; label: string }[] = [
@@ -60,6 +64,11 @@ export function RegistrationForm() {
   const [acceptTerms, setAcceptTerms] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+  const captchaRequired = isCaptchaEnabledOnClient();
+  const handleCaptchaToken = useCallback((token: string | null) => {
+    setCaptchaToken(token);
+  }, []);
 
   const passwordsMismatch =
     confirmPassword.length > 0 && password !== confirmPassword;
@@ -105,6 +114,10 @@ export function RegistrationForm() {
       setError("Debes aceptar las condiciones para continuar");
       return;
     }
+    if (captchaRequired && !captchaToken) {
+      setError("Completa la verificación anti-bot antes de continuar.");
+      return;
+    }
 
     setLoading(true);
     try {
@@ -120,6 +133,7 @@ export function RegistrationForm() {
           password,
           confirmPassword,
           acceptTerms,
+          captchaToken,
         }),
       });
       const data = (await res.json()) as {
@@ -356,6 +370,8 @@ export function RegistrationForm() {
         onClose={() => setPrivacyOpen(false)}
       />
 
+      <TurnstileField onToken={handleCaptchaToken} />
+
       {error ? (
         <p className="text-sm text-red-600" role="alert">
           {error}
@@ -364,7 +380,7 @@ export function RegistrationForm() {
 
       <button
         type="submit"
-        disabled={loading}
+        disabled={loading || (captchaRequired && !captchaToken)}
         className="mt-2 rounded-full bg-brand py-3 text-[15px] font-medium text-white hover:bg-brand-hover disabled:opacity-60"
       >
         {loading ? "Preparando pago…" : "Continuar al pago"}

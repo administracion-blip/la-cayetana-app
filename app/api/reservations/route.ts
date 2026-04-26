@@ -9,6 +9,7 @@ import {
 } from "@/lib/email/reservations-mail";
 import { isLikelyEmail, isLikelyPhone } from "@/lib/identity";
 import { enforceRateLimit, RateLimitError } from "@/lib/rate-limit";
+import { verifyCaptcha } from "@/lib/security/captcha";
 import {
   getPrepaymentConfig,
 } from "@/lib/repositories/reservation-config";
@@ -93,6 +94,16 @@ export async function POST(request: Request) {
 
   try {
     const payload = parsed.data;
+
+    // Captcha exigido SOLO a guests anónimos: el socio logueado ya pasó
+    // la verificación en el login y nuestro UI no se lo pinta. Validar
+    // siempre en el server por si un cliente toquetea el payload.
+    if (requester.kind !== "user") {
+      const captcha = await verifyCaptcha(payload.captchaToken, request);
+      if (!captcha.ok) {
+        return NextResponse.json({ error: captcha.error }, { status: 400 });
+      }
+    }
 
     if (requester.kind === "user") {
       const user = requester.user;

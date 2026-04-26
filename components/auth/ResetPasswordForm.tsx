@@ -2,7 +2,11 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useCallback, useState } from "react";
+import {
+  isCaptchaEnabledOnClient,
+  TurnstileField,
+} from "@/components/security/TurnstileField";
 
 type Props = {
   initialToken: string;
@@ -14,6 +18,11 @@ export function ResetPasswordForm({ initialToken }: Props) {
   const [password2, setPassword2] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+  const captchaRequired = isCaptchaEnabledOnClient();
+  const handleCaptchaToken = useCallback((token: string | null) => {
+    setCaptchaToken(token);
+  }, []);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -30,13 +39,17 @@ export function ResetPasswordForm({ initialToken }: Props) {
       setError("Falta el token del enlace. Abre el enlace del correo completo.");
       return;
     }
+    if (captchaRequired && !captchaToken) {
+      setError("Completa la verificación anti-bot antes de continuar.");
+      return;
+    }
 
     setLoading(true);
     try {
       const res = await fetch("/api/auth/reset-password", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token: initialToken, password }),
+        body: JSON.stringify({ token: initialToken, password, captchaToken }),
       });
       const data = (await res.json().catch(() => ({}))) as { error?: string };
       if (!res.ok) {
@@ -101,6 +114,7 @@ export function ResetPasswordForm({ initialToken }: Props) {
           className="w-full rounded-xl border border-border bg-background px-4 py-3 text-[15px] outline-none ring-brand focus:ring-2"
         />
       </div>
+      <TurnstileField onToken={handleCaptchaToken} />
       {error ? (
         <p className="text-sm text-red-600" role="alert">
           {error}
@@ -108,7 +122,7 @@ export function ResetPasswordForm({ initialToken }: Props) {
       ) : null}
       <button
         type="submit"
-        disabled={loading}
+        disabled={loading || (captchaRequired && !captchaToken)}
         className="mt-2 rounded-full bg-brand py-3 text-[15px] font-medium text-white hover:bg-brand-hover disabled:opacity-60"
       >
         {loading ? "Guardando…" : "Guardar contraseña"}

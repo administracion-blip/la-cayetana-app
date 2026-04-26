@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { setGuestCookieOnResponse } from "@/lib/auth/guest-cookie";
 import { createGuestToken } from "@/lib/auth/reservations";
 import { enforceRateLimit, RateLimitError } from "@/lib/rate-limit";
+import { verifyCaptcha } from "@/lib/security/captcha";
 import { findGuestByEmail } from "@/lib/repositories/reservations";
 import { verifyAndConsumeOtp } from "@/lib/repositories/reservation-otp";
 import { guestOtpVerifySchema } from "@/lib/validation-reservations";
@@ -52,6 +53,11 @@ export async function POST(request: Request) {
       { error: parsed.error.issues[0]?.message ?? "Datos inválidos" },
       { status: 400 },
     );
+  }
+
+  const captcha = await verifyCaptcha(parsed.data.captchaToken, request);
+  if (!captcha.ok) {
+    return NextResponse.json({ error: captcha.error }, { status: 400 });
   }
 
   try {

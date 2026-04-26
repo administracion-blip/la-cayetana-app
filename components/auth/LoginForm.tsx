@@ -2,7 +2,11 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useCallback, useState } from "react";
+import {
+  isCaptchaEnabledOnClient,
+  TurnstileField,
+} from "@/components/security/TurnstileField";
 
 type Props = {
   initialError?: string | null;
@@ -16,16 +20,25 @@ export function LoginForm({ initialError, successMessage }: Props) {
   const [rememberMe, setRememberMe] = useState(true);
   const [error, setError] = useState<string | null>(initialError ?? null);
   const [loading, setLoading] = useState(false);
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+  const captchaRequired = isCaptchaEnabledOnClient();
+  const handleCaptchaToken = useCallback((token: string | null) => {
+    setCaptchaToken(token);
+  }, []);
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError(null);
+    if (captchaRequired && !captchaToken) {
+      setError("Completa la verificación anti-bot antes de continuar.");
+      return;
+    }
     setLoading(true);
     try {
       const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password, rememberMe }),
+        body: JSON.stringify({ email, password, rememberMe, captchaToken }),
       });
       const data = (await res.json().catch(() => ({}))) as { error?: string };
       if (!res.ok) {
@@ -95,6 +108,7 @@ export function LoginForm({ initialError, successMessage }: Props) {
         />
         Recordarme en este dispositivo
       </label>
+      <TurnstileField onToken={handleCaptchaToken} />
       {successMessage ? (
         <p className="text-sm text-emerald-800" role="status">
           {successMessage}
@@ -107,7 +121,7 @@ export function LoginForm({ initialError, successMessage }: Props) {
       ) : null}
       <button
         type="submit"
-        disabled={loading}
+        disabled={loading || (captchaRequired && !captchaToken)}
         className="mt-2 rounded-full bg-brand py-3 text-[15px] font-medium text-white hover:bg-brand-hover active:bg-[#8f1d1d] disabled:opacity-60"
       >
         {loading ? "Entrando…" : "Entrar"}

@@ -1,8 +1,13 @@
 import { NextResponse } from "next/server";
 import { hashPassword } from "@/lib/auth/password";
 import { isCarnetPurchaseClosed } from "@/lib/carnet-purchase-deadline";
+import { normalizeEmail } from "@/lib/constants";
 import { getEnv } from "@/lib/env";
-import { enforceRateLimit, RateLimitError } from "@/lib/rate-limit";
+import { verifyCaptcha } from "@/lib/security/captcha";
+import {
+  applyRateLimits,
+  extractClientIp,
+} from "@/lib/security/rate-limit-http";
 import {
   canRenewThisYear,
   createPendingUser,
@@ -13,12 +18,6 @@ import {
   UserAlreadyPaidThisYearError,
 } from "@/lib/repositories/users";
 import { registrationStartSchema } from "@/lib/validation";
-
-function extractClientIp(request: Request): string {
-  const xff = request.headers.get("x-forwarded-for");
-  if (xff) return xff.split(",")[0]?.trim() || "unknown";
-  return request.headers.get("x-real-ip") ?? "unknown";
-}
 
 /**
  * Alta o renovación desde `/registro`.
@@ -36,30 +35,21 @@ function extractClientIp(request: Request): string {
  */
 export async function POST(request: Request) {
   try {
-    // Rate-limit antes incluso de parsear el JSON: 6 intentos por IP cada
-    // 10 minutos. Frena spam de altas y enumeración masiva de emails sin
-    // afectar a usuarios reales que se equivocan al rellenar el form.
-    try {
-      await enforceRateLimit({
-        key: `auth:registration:ip:${extractClientIp(request)}`,
-        windowMs: 10 * 60 * 1000,
-        max: 6,
-      });
-    } catch (err) {
-      if (err instanceof RateLimitError) {
-        return NextResponse.json(
-          {
-            error:
-              "Demasiados intentos. Espera unos minutos y vuelve a intentarlo.",
-          },
-          {
-            status: 429,
-            headers: { "Retry-After": String(err.retryAfterSec) },
-          },
-        );
-      }
-      throw err;
-    }
+    // Primer freno: 6 intentos por IP cada 10 min. Frena spam masivo
+    // (un atacante con 1 IP no puede iterar emails sin descanso).
+    const ip = extractClientIp(request);
+    const ipLimit = await applyRateLimits(
+      request,
+      [
+        {
+          key: `auth:registration:ip:${ip}`,
+          windowMs: 10 * 60 * 1000,
+          max: 6,
+        },
+      ],
+      { route: "registration/start" },
+    );
+    if (!ipLimit.ok) return ipLimit.response;
 
     const json = await request.json();
     const parsed = registrationStartSchema.safeParse(json);
@@ -71,8 +61,34 @@ export async function POST(request: Request) {
       );
     }
 
-    const { name, email, phone, sex, birthYear, password } = parsed.data;
+    const { name, email, phone, sex, birthYear, password, captchaToken } =
+      parsed.data;
     const { NEXT_PUBLIC_STRIPE_PAYMENT_LINK: paymentLink } = getEnv();
+
+    // Verificación anti-bot (Turnstile). Si el captcha está desactivado
+    // por env, devuelve `{ ok: true, mode: "disabled" }` sin gastar red.
+    const captcha = await verifyCaptcha(captchaToken, request);
+    if (!captcha.ok) {
+      return NextResponse.json({ error: captcha.error }, { status: 400 });
+    }
+
+    // Segundo freno: 3 intentos por email cada 10 min. Bloquea ataques
+    // distribuidos (muchas IPs apuntando al mismo correo) y enumeración
+    // dirigida. Va después de la validación del schema para no penalizar
+    // payloads ilegibles que ni siquiera traen un email válido.
+    const emailNormalized = normalizeEmail(email);
+    const emailLimit = await applyRateLimits(
+      request,
+      [
+        {
+          key: `auth:registration:email:${emailNormalized}`,
+          windowMs: 10 * 60 * 1000,
+          max: 3,
+        },
+      ],
+      { route: "registration/start" },
+    );
+    if (!emailLimit.ok) return emailLimit.response;
 
     const existing = await getUserByEmail(email);
     const isRenewal =

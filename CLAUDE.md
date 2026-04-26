@@ -197,6 +197,50 @@ Antes de dar una tarea por finalizada, revisa:
 
 ---
 
+## Variables de entorno relacionadas con seguridad
+
+### Rate limiting (`lib/rate-limit.ts`)
+
+- `RATE_LIMIT_BACKEND` — `memory` (default) o `dynamo`.
+  - `memory`: contador en memoria por proceso. Útil en dev y en despliegues
+    monolíticos. **No comparte estado entre instancias** (lambda/SSR cold-starts
+    diluyen el límite).
+  - `dynamo`: usa la tabla `USERS_TABLE_NAME` con `PK=RATE_LIMIT#<key>` y TTL.
+    Recomendado en producción cuando hay más de un proceso/región.
+- Si activas `dynamo`, asegúrate de que el atributo TTL de la tabla está
+  habilitado sobre el campo `ttl` (ya cubierto por la tabla principal).
+
+### Cloudflare Turnstile (`lib/security/captcha.ts`)
+
+- `NEXT_PUBLIC_TURNSTILE_SITE_KEY` (cliente) y `TURNSTILE_SECRET_KEY` (server).
+- Si **ambas** están vacías → el captcha está desactivado: el componente
+  `<TurnstileField>` no se renderiza y `verifyCaptcha()` deja pasar. Útil en
+  desarrollo.
+- Si **ambas** están configuradas → todos los formularios públicos exigen
+  pasar el reto antes de enviar (registro, login, forgot, reset, accept-invite,
+  reservas como guest). El usuario logueado no ve captcha.
+
+Endpoints que llaman a `verifyCaptcha`:
+
+- `POST /api/registration/start`
+- `POST /api/auth/login`
+- `POST /api/auth/forgot-password`
+- `POST /api/auth/reset-password`
+- `POST /api/auth/accept-invite`
+- `POST /api/reservations` (solo guests)
+- `POST /api/reservations/guest/magic-link`
+- `POST /api/reservations/guest/otp/request`
+- `POST /api/reservations/guest/otp/verify`
+
+### Logs de seguridad
+
+Todos los rechazos por rate limit registran `[security][rate-limit]` con
+`route`, `key` saneada (PII reemplazada por `hashTag`) y `retryAfterSec`.
+Los rechazos del captcha registran `[security][captcha]`. Filtra por estos
+prefijos en CloudWatch para detectar picos de abuso.
+
+---
+
 ## Reglas para cambios en producción
 
 1. No asumas que puedes tocar datos de producción.

@@ -115,6 +115,8 @@ export interface CreateReservationArgs {
   }[];
   notes?: string;
   contact?: { name: string; email: string; phone: string };
+  /** Token de Cloudflare Turnstile para guests; ignorado si está vacío. */
+  captchaToken?: string | null;
 }
 
 export async function createReservation(args: CreateReservationArgs): Promise<{

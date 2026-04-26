@@ -95,6 +95,35 @@ const schema = z.object({
           "FECHA_LIMITE_COMPRA_CARNET debe ser una fecha/hora ISO 8601 válida",
       },
     ),
+  /**
+   * Cloudflare Turnstile — protección anti-bot en formularios públicos
+   * (registro, login, forgot, reset, alta de reserva, accept-invite).
+   *
+   * Site key: pública, se inyecta en el cliente (`NEXT_PUBLIC_*`).
+   * Secret key: privada, se usa server-side para validar el token.
+   *
+   * Si AMBAS están vacías el captcha se desactiva globalmente (modo dev /
+   * fallback). Si solo falta una, se considera mal configurado y el
+   * verificador se loggea pero deja pasar (fail-open) para no romper la
+   * web por un despliegue a medias.
+   */
+  NEXT_PUBLIC_TURNSTILE_SITE_KEY: z
+    .union([z.string().min(1), z.literal("")])
+    .optional()
+    .transform((v) => (v === "" ? undefined : v)),
+  TURNSTILE_SECRET_KEY: z
+    .union([z.string().min(1), z.literal("")])
+    .optional()
+    .transform((v) => (v === "" ? undefined : v)),
+  /**
+   * Backend del rate limiter. `memory` (default): contador por proceso,
+   * útil en dev. `dynamo`: persistente y compartido entre réplicas
+   * (recomendado en producción). Ver `lib/rate-limit.ts`.
+   */
+  RATE_LIMIT_BACKEND: z
+    .union([z.literal("memory"), z.literal("dynamo"), z.literal("")])
+    .optional()
+    .transform((v) => (v === "" || v === undefined ? "memory" : v)),
 });
 
 export type Env = z.infer<typeof schema>;

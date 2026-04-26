@@ -1,23 +1,36 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useCallback, useState } from "react";
+import {
+  isCaptchaEnabledOnClient,
+  TurnstileField,
+} from "@/components/security/TurnstileField";
 
 export function ForgotPasswordForm() {
   const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+  const captchaRequired = isCaptchaEnabledOnClient();
+  const handleCaptchaToken = useCallback((token: string | null) => {
+    setCaptchaToken(token);
+  }, []);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    if (captchaRequired && !captchaToken) {
+      setError("Completa la verificación anti-bot antes de continuar.");
+      return;
+    }
     setLoading(true);
     try {
       const res = await fetch("/api/auth/forgot-password", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email }),
+        body: JSON.stringify({ email, captchaToken }),
       });
       const data = (await res.json().catch(() => ({}))) as {
         error?: string;
@@ -71,6 +84,7 @@ export function ForgotPasswordForm() {
           className="w-full rounded-xl border border-border bg-background px-4 py-3 text-[15px] outline-none ring-brand focus:ring-2"
         />
       </div>
+      <TurnstileField onToken={handleCaptchaToken} />
       {error ? (
         <p className="text-sm text-red-600" role="alert">
           {error}
@@ -78,7 +92,7 @@ export function ForgotPasswordForm() {
       ) : null}
       <button
         type="submit"
-        disabled={loading}
+        disabled={loading || (captchaRequired && !captchaToken)}
         className="mt-2 rounded-full bg-brand py-3 text-[15px] font-medium text-white hover:bg-brand-hover disabled:opacity-60"
       >
         {loading ? "Enviando…" : "Enviar enlace"}

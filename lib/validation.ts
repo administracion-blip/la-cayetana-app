@@ -9,6 +9,16 @@ export const MIN_BIRTH_YEAR = CURRENT_YEAR - 100;
 
 export const USER_SEX_VALUES = ["male", "female", "prefer_not_to_say"] as const;
 
+/**
+ * Token de Turnstile que envían los formularios públicos. Es opcional en
+ * el schema porque el captcha se activa por env (ver `lib/security/captcha.ts`):
+ * cuando está desactivado, el formulario manda `null`/`undefined` y el
+ * backend ignora el campo. La verificación real ocurre en el handler.
+ */
+export const captchaTokenField = z
+  .union([z.string().min(1).max(2048), z.null()])
+  .optional();
+
 export const registrationStartSchema = z
   .object({
     name: z.string().trim().min(1).max(120),
@@ -25,6 +35,7 @@ export const registrationStartSchema = z
     acceptTerms: z.literal(true, {
       message: "Debes aceptar las condiciones",
     }),
+    captchaToken: captchaTokenField,
   })
   .refine((v) => v.password === v.confirmPassword, {
     path: ["confirmPassword"],
@@ -48,15 +59,18 @@ export const loginSchema = z.object({
       }
       return undefined;
     }, z.boolean().default(true)),
+  captchaToken: captchaTokenField,
 });
 
 export const forgotPasswordSchema = z.object({
   email: z.string().email(),
+  captchaToken: captchaTokenField,
 });
 
 export const resetPasswordSchema = z.object({
   token: z.string().min(64).max(128),
   password: z.string().min(8).max(128),
+  captchaToken: captchaTokenField,
 });
 
 /**
@@ -126,6 +140,7 @@ export const acceptInviteSchema = z
     acceptTerms: z.literal(true, {
       message: "Debes aceptar las condiciones",
     }),
+    captchaToken: captchaTokenField,
   })
   .refine((v) => v.password === v.confirmPassword, {
     path: ["confirmPassword"],

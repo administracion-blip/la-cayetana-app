@@ -3,6 +3,7 @@ import { isLoginClosed } from "@/lib/access-gates";
 import { verifyPassword } from "@/lib/auth/password";
 import { createSessionToken, setSessionCookie } from "@/lib/auth/session";
 import { enforceRateLimit, RateLimitError } from "@/lib/rate-limit";
+import { verifyCaptcha } from "@/lib/security/captcha";
 import { getUserByEmail } from "@/lib/repositories/users";
 import { loginSchema } from "@/lib/validation";
 
@@ -83,7 +84,7 @@ export async function POST(request: Request) {
       return redirectTo(request, "/login?error=bad-input");
     }
 
-    const { email, password, rememberMe } = parsed.data;
+    const { email, password, rememberMe, captchaToken } = parsed.data;
 
     try {
       await enforceLoginRateLimit(extractClientIp(request), email);
@@ -92,6 +93,17 @@ export async function POST(request: Request) {
         return rateLimitResponse(err, asJson, request);
       }
       throw err;
+    }
+
+    // Captcha (si está configurado en env). Se valida después del rate
+    // limit por IP/email para que un atacante no agote cuotas de Turnstile
+    // disparando peticiones triviales.
+    const captcha = await verifyCaptcha(captchaToken, request);
+    if (!captcha.ok) {
+      if (asJson) {
+        return NextResponse.json({ error: captcha.error }, { status: 400 });
+      }
+      return redirectTo(request, "/login?error=captcha");
     }
 
     const user = await getUserByEmail(email);

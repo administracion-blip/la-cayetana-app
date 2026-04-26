@@ -1,7 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { PrivacyPolicyModal } from "@/components/auth/PrivacyPolicyModal";
+import {
+  isCaptchaEnabledOnClient,
+  TurnstileField,
+} from "@/components/security/TurnstileField";
 import { MAX_BIRTH_YEAR, MIN_BIRTH_YEAR } from "@/lib/validation";
 
 const SEX_OPTIONS: {
@@ -76,6 +80,11 @@ export function AcceptInviteForm({ token }: Props) {
   const [done, setDone] = useState<{ membershipId: string | null } | null>(
     null,
   );
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+  const captchaRequired = isCaptchaEnabledOnClient();
+  const handleCaptchaToken = useCallback((token: string | null) => {
+    setCaptchaToken(token);
+  }, []);
 
   const passwordsMismatch =
     confirmPassword.length > 0 && password !== confirmPassword;
@@ -169,6 +178,10 @@ export function AcceptInviteForm({ token }: Props) {
       setError("Debes aceptar las condiciones para continuar");
       return;
     }
+    if (captchaRequired && !captchaToken) {
+      setError("Completa la verificación anti-bot antes de continuar.");
+      return;
+    }
 
     setLoading(true);
     try {
@@ -184,6 +197,7 @@ export function AcceptInviteForm({ token }: Props) {
           password,
           confirmPassword,
           acceptTerms,
+          captchaToken,
         }),
       });
       const data = (await res.json().catch(() => null)) as
@@ -463,6 +477,8 @@ export function AcceptInviteForm({ token }: Props) {
         onClose={() => setPrivacyOpen(false)}
       />
 
+      <TurnstileField onToken={handleCaptchaToken} />
+
       {error ? (
         <p className="text-sm text-red-600" role="alert">
           {error}
@@ -471,7 +487,7 @@ export function AcceptInviteForm({ token }: Props) {
 
       <button
         type="submit"
-        disabled={loading}
+        disabled={loading || (captchaRequired && !captchaToken)}
         className="mt-2 rounded-full bg-brand py-3 text-[15px] font-medium text-white hover:bg-brand-hover disabled:opacity-60"
       >
         {loading ? "Completando alta…" : "Completar alta"}

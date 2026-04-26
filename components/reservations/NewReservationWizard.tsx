@@ -9,6 +9,10 @@ import {
 } from "@/lib/reservation-menus-helpers";
 import { formatAmountEuros } from "@/components/reservations/formatters";
 import {
+  isCaptchaEnabledOnClient,
+  TurnstileField,
+} from "@/components/security/TurnstileField";
+import {
   createReservation,
   fetchSlotsForDate,
   type ReservationsApiError,
@@ -82,6 +86,17 @@ export function NewReservationWizard({
   const [slotError, setSlotError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+  /**
+   * Solo exigimos captcha al socio NO logueado: una vez dentro de la web
+   * (sesión válida + cookie httpOnly) ya hemos pasado el control de bot
+   * en el login y exigirlo otra vez es ruido innecesario.
+   */
+  const captchaRequired =
+    !viewer.isLoggedIn && isCaptchaEnabledOnClient();
+  const handleCaptchaToken = useCallback((token: string | null) => {
+    setCaptchaToken(token);
+  }, []);
 
   const minDate = useMemo(() => {
     const t = todayIso();
@@ -290,6 +305,12 @@ export function NewReservationWizard({
   }, [step, viewer.isLoggedIn]);
 
   const handleSubmit = useCallback(async () => {
+    if (captchaRequired && !captchaToken) {
+      setSubmitError(
+        "Completa la verificación anti-bot antes de crear la reserva.",
+      );
+      return;
+    }
     setSubmitting(true);
     setSubmitError(null);
     try {
@@ -326,6 +347,7 @@ export function NewReservationWizard({
               email: contact.email.trim(),
               phone: contact.phone.trim(),
             },
+        captchaToken: captchaRequired ? captchaToken : undefined,
       };
       const res = await createReservation(payload);
       if (onCreated) {
@@ -341,6 +363,8 @@ export function NewReservationWizard({
       setSubmitting(false);
     }
   }, [
+    captchaRequired,
+    captchaToken,
     date,
     time,
     partySize,
@@ -865,6 +889,9 @@ export function NewReservationWizard({
               queda pendiente hasta que recibamos la señal.
             </div>
           ) : null}
+          {captchaRequired ? (
+            <TurnstileField onToken={handleCaptchaToken} />
+          ) : null}
           {submitError ? (
             <p className="text-sm text-rose-700" role="alert">
               {submitError}
@@ -899,7 +926,11 @@ export function NewReservationWizard({
           <button
             type="button"
             onClick={handleSubmit}
-            disabled={!canGoNext || submitting}
+            disabled={
+              !canGoNext ||
+              submitting ||
+              (captchaRequired && !captchaToken)
+            }
             className="rounded-full bg-brand px-5 py-2 text-sm font-medium text-white hover:bg-brand-hover disabled:opacity-60"
           >
             {submitting ? "Creando…" : "Crear reserva"}

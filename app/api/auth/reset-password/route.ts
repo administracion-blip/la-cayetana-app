@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import { hashPassword } from "@/lib/auth/password";
 import { hashResetToken } from "@/lib/auth/reset-token";
+import { verifyCaptcha } from "@/lib/security/captcha";
+import {
+  applyRateLimits,
+  extractClientIp,
+} from "@/lib/security/rate-limit-http";
 import {
   deletePasswordReset,
   getPasswordReset,
@@ -11,6 +16,22 @@ import { resetPasswordSchema } from "@/lib/validation";
 
 export async function POST(request: Request) {
   try {
+    // RL por IP: 20 cambios cada 10 min. Frena fuerza bruta sobre tokens
+    // (aunque el token tiene 64 hex de entropía, no cuesta nada limitarlo).
+    const ip = extractClientIp(request);
+    const ipLimit = await applyRateLimits(
+      request,
+      [
+        {
+          key: `auth:reset:ip:${ip}`,
+          windowMs: 10 * 60 * 1000,
+          max: 20,
+        },
+      ],
+      { route: "auth/reset-password" },
+    );
+    if (!ipLimit.ok) return ipLimit.response;
+
     const raw = await request.json();
     const parsed = resetPasswordSchema.safeParse(raw);
     if (!parsed.success) {
@@ -20,8 +41,31 @@ export async function POST(request: Request) {
       );
     }
 
-    const { token, password } = parsed.data;
+    const { token, password, captchaToken } = parsed.data;
+
+    const captcha = await verifyCaptcha(captchaToken, request);
+    if (!captcha.ok) {
+      return NextResponse.json({ error: captcha.error }, { status: 400 });
+    }
+
     const tokenHash = hashResetToken(token);
+
+    // Segundo freno: 5 intentos por token cada 10 min. Si alguien encuentra
+    // un token (logs, captura) que no es suyo, no puede usarlo para
+    // ensayar contraseñas distintas indefinidamente.
+    const tokenLimit = await applyRateLimits(
+      request,
+      [
+        {
+          key: `auth:reset:token:${tokenHash}`,
+          windowMs: 10 * 60 * 1000,
+          max: 5,
+        },
+      ],
+      { route: "auth/reset-password" },
+    );
+    if (!tokenLimit.ok) return tokenLimit.response;
+
     const record = await getPasswordReset(tokenHash);
 
     if (!record || isPasswordResetExpired(record)) {

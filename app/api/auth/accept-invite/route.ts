@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import { hashInviteToken } from "@/lib/auth/invite-token";
 import { hashPassword } from "@/lib/auth/password";
-import { enforceRateLimit, RateLimitError } from "@/lib/rate-limit";
+import { verifyCaptcha } from "@/lib/security/captcha";
+import {
+  applyRateLimits,
+  extractClientIp,
+} from "@/lib/security/rate-limit-http";
 import {
   deleteMemberInvite,
   getMemberInvite,
@@ -16,12 +20,6 @@ import { acceptInviteSchema } from "@/lib/validation";
 
 const LOG = "[auth/accept-invite]";
 
-function extractClientIp(request: Request): string {
-  const xff = request.headers.get("x-forwarded-for");
-  if (xff) return xff.split(",")[0]?.trim() || "unknown";
-  return request.headers.get("x-real-ip") ?? "unknown";
-}
-
 /**
  * `POST /api/auth/accept-invite`
  *
@@ -31,27 +29,20 @@ function extractClientIp(request: Request): string {
  */
 export async function POST(request: Request) {
   try {
-    try {
-      await enforceRateLimit({
-        key: `auth:accept-invite:ip:${extractClientIp(request)}`,
-        windowMs: 10 * 60 * 1000,
-        max: 10,
-      });
-    } catch (err) {
-      if (err instanceof RateLimitError) {
-        return NextResponse.json(
-          {
-            error:
-              "Demasiados intentos. Espera unos minutos y vuelve a intentarlo.",
-          },
-          {
-            status: 429,
-            headers: { "Retry-After": String(err.retryAfterSec) },
-          },
-        );
-      }
-      throw err;
-    }
+    // RL por IP (10 / 10 min). Frena spam genérico desde una IP.
+    const ip = extractClientIp(request);
+    const ipLimit = await applyRateLimits(
+      request,
+      [
+        {
+          key: `auth:accept-invite:ip:${ip}`,
+          windowMs: 10 * 60 * 1000,
+          max: 10,
+        },
+      ],
+      { route: "auth/accept-invite" },
+    );
+    if (!ipLimit.ok) return ipLimit.response;
 
     const json = await request.json();
     const parsed = acceptInviteSchema.safeParse(json);
@@ -63,8 +54,32 @@ export async function POST(request: Request) {
       );
     }
 
-    const { token, name, phone, sex, birthYear, password } = parsed.data;
+    const { token, name, phone, sex, birthYear, password, captchaToken } =
+      parsed.data;
+
+    const captcha = await verifyCaptcha(captchaToken, request);
+    if (!captcha.ok) {
+      return NextResponse.json({ error: captcha.error }, { status: 400 });
+    }
+
     const tokenHash = hashInviteToken(token);
+
+    // RL por token (5 / 10 min). Si una invitación se filtra, evita que
+    // un atacante la use repetidamente para mapear el formulario o
+    // reintentar variantes de contraseña.
+    const tokenLimit = await applyRateLimits(
+      request,
+      [
+        {
+          key: `auth:accept-invite:token:${tokenHash}`,
+          windowMs: 10 * 60 * 1000,
+          max: 5,
+        },
+      ],
+      { route: "auth/accept-invite" },
+    );
+    if (!tokenLimit.ok) return tokenLimit.response;
+
     const invite = await getMemberInvite(tokenHash);
 
     if (!invite || isMemberInviteExpired(invite)) {

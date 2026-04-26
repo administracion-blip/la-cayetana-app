@@ -4,6 +4,7 @@
  */
 
 import { z } from "zod";
+import { captchaTokenField } from "@/lib/validation";
 
 const trimmed = (min: number, max: number) =>
   z.string().trim().min(min).max(max);
@@ -51,6 +52,8 @@ export const createReservationSchema = z.object({
   contact: contactSchema.optional(),
   /** Cantidades por menú; con ofertas activas, en servidor la suma debe ser partySize. */
   menuLines: z.array(menuLineSchema).default([]),
+  /** Captcha solo lo envían los guests (logueados ya pasaron el de login). */
+  captchaToken: captchaTokenField,
 });
 
 export type CreateReservationPayload = z.infer<
@@ -77,11 +80,13 @@ export const slotsQuerySchema = z.object({
 
 export const guestMagicLinkSchema = z.object({
   email: z.string().trim().toLowerCase().email(),
+  captchaToken: captchaTokenField,
 });
 
 /** Payload de `POST /api/reservations/guest/otp/request`. */
 export const guestOtpRequestSchema = z.object({
   email: z.string().trim().toLowerCase().email(),
+  captchaToken: captchaTokenField,
 });
 
 /** Payload de `POST /api/reservations/guest/otp/verify`. */
@@ -91,6 +96,7 @@ export const guestOtpVerifySchema = z.object({
     .string()
     .trim()
     .regex(/^\d{6}$/, { message: "Código inválido" }),
+  captchaToken: captchaTokenField,
 });
 
 // ─── Admin ────────────────────────────────────────────────────────────

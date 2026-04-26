@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createGuestToken } from "@/lib/auth/reservations";
 import { sendGuestMagicLinkEmail } from "@/lib/email/reservations-mail";
 import { enforceRateLimit, RateLimitError } from "@/lib/rate-limit";
+import { verifyCaptcha } from "@/lib/security/captcha";
 import {
   findGuestByEmail,
   listReservationsByEmail,
@@ -59,6 +60,14 @@ export async function POST(request: Request) {
       { error: parsed.error.issues[0]?.message ?? "Email no válido" },
       { status: 400 },
     );
+  }
+
+  // Captcha 400 explícito: aquí no estamos confirmando si el email existe
+  // (la respuesta neutral viene después), solo que el form se rellenó por
+  // un humano.
+  const captcha = await verifyCaptcha(parsed.data.captchaToken, request);
+  if (!captcha.ok) {
+    return NextResponse.json({ error: captcha.error }, { status: 400 });
   }
 
   try {
