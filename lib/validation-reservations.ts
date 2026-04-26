@@ -129,7 +129,14 @@ export const adminReservationScheduleSchema = z.object({
   systemMessage: trimmed(0, 2000).optional().or(z.literal("")),
 });
 
-/** `POST /admin/reservations/:id/details` — contacto + comensales + fecha/hora */
+/**
+ * `POST /admin/reservations/:id/details` — contacto + comensales + fecha/hora.
+ *
+ * `menuLines` opcional: si llega, el endpoint reescribe en la misma
+ * transacción el reparto de menús junto al resto de campos. Sirve para
+ * resolver el bloqueo cruzado entre comensales y menús (no se podía
+ * cambiar uno sin el otro porque cada validación bloqueaba al otro).
+ */
 export const adminReservationDetailsSchema = z.object({
   contact: contactSchema,
   partySize: z.coerce.number().int().min(1).max(50),
@@ -137,6 +144,7 @@ export const adminReservationDetailsSchema = z.object({
   reservationTime: timeStrSchema,
   expectedVersion: z.coerce.number().int().nonnegative(),
   systemMessage: trimmed(0, 2000).optional().or(z.literal("")),
+  menuLines: z.array(menuLineSchema).optional(),
 });
 
 /** `POST /api/admin/reservations/:id/table` — etiqueta de mesa (texto libre). */

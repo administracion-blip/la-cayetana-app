@@ -12,6 +12,10 @@ import {
   formatRelativeTimestamp,
 } from "@/components/reservations/formatters";
 import { AdminReservationMenuEditor } from "@/components/admin/reservations/AdminReservationMenuEditor";
+import {
+  MenuLinesInlineEditor,
+  type MenuLinesEditorState,
+} from "@/components/admin/reservations/MenuLinesInlineEditor";
 import { ReservationStatusBadge } from "@/components/reservations/ReservationStatusBadge";
 import {
   adminAddNote,
@@ -273,6 +277,14 @@ function Summary({
   const [partySize, setPartySize] = useState(String(reservation.partySize));
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  // El editor inline de menús reporta su estado/payload al modal cuando
+  // la reserva ya tiene reparto guardado. Si no lo tiene, se queda en
+  // `null` y el modal sigue funcionando como antes (sin tocar menús).
+  const [menuState, setMenuState] = useState<MenuLinesEditorState | null>(
+    null,
+  );
+
+  const hasMenuLines = (reservation.menuLineItems?.length ?? 0) > 0;
 
   useEffect(() => {
     if (editOpen) return;
@@ -282,6 +294,7 @@ function Summary({
     setReservationDate(reservation.reservationDate);
     setReservationTime(reservation.reservationTime);
     setPartySize(String(reservation.partySize));
+    setMenuState(null);
   }, [
     reservation.reservationId,
     reservation.version,
@@ -299,13 +312,29 @@ function Summary({
     setReservationDate(reservation.reservationDate);
     setReservationTime(reservation.reservationTime);
     setPartySize(String(reservation.partySize));
+    setMenuState(null);
     setFormError(null);
     setEditOpen(true);
   };
 
+  const partySizeNum = Number(partySize);
+  const partySizeNumValid =
+    Number.isFinite(partySizeNum) && partySizeNum >= 1;
+  const partySizeChanged =
+    partySizeNumValid && partySizeNum !== reservation.partySize;
+  // El reparto solo viaja en el payload cuando hay menús guardados
+  // y han cambiado los comensales o el propio reparto. Mientras el
+  // catálogo está cargando, bloqueamos el guardado para no enviar un
+  // payload incompleto.
+  const menuStateBlocked =
+    hasMenuLines &&
+    partySizeChanged &&
+    (menuState == null ||
+      menuState.kind !== "ready" ||
+      !menuState.isValid);
+
   const saveEdit = async () => {
-    const n = Number(partySize);
-    if (!Number.isFinite(n) || n < 1) {
+    if (!partySizeNumValid) {
       setFormError("Número de comensales no válido.");
       return;
     }
@@ -314,10 +343,14 @@ function Summary({
     try {
       await adminUpdateReservationDetails(reservation.reservationId, {
         contact: { name: name.trim(), email: email.trim(), phone: phone.trim() },
-        partySize: n,
+        partySize: partySizeNum,
         reservationDate: reservationDate.trim(),
         reservationTime: reservationTime.trim(),
         expectedVersion: reservation.version,
+        menuLines:
+          hasMenuLines && partySizeChanged && menuState?.kind === "ready"
+            ? menuState.menuLines
+            : undefined,
       });
       setEditOpen(false);
       onSaved();
@@ -467,6 +500,33 @@ function Summary({
                 />
               </label>
             </div>
+            {hasMenuLines && partySizeChanged ? (
+              <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50/70 p-3">
+                <p className="text-xs font-semibold text-amber-900">
+                  Ajusta el reparto de menús al nuevo nº de comensales
+                </p>
+                <p className="mt-0.5 text-[11px] text-amber-900/80">
+                  Antes: {reservation.partySize} → Ahora: {partySizeNum}.
+                  El reparto se guardará junto con el resto.
+                </p>
+                <div className="mt-2">
+                  <MenuLinesInlineEditor
+                    initialMenuLineItems={reservation.menuLineItems}
+                    targetPartySize={partySizeNum}
+                    disabled={saving}
+                    onStateChange={setMenuState}
+                  />
+                </div>
+                {menuState?.kind === "ready" && menuState.problem ? (
+                  <p
+                    className="mt-2 text-[11px] font-medium text-rose-700"
+                    role="status"
+                  >
+                    {menuState.problem}
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
             {formError ? (
               <p className="mt-2 text-xs text-rose-700" role="alert">
                 {formError}
@@ -484,7 +544,7 @@ function Summary({
               <button
                 type="button"
                 onClick={() => void saveEdit()}
-                disabled={saving}
+                disabled={saving || menuStateBlocked}
                 className="rounded-full bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-hover disabled:opacity-60"
               >
                 {saving ? "Guardando…" : "Guardar"}

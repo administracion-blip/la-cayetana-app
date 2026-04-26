@@ -830,6 +830,18 @@ export interface UpdateReservationDetailsInput {
   reservationTime: string;
   updatedBy: string;
   systemMessage?: string;
+  /**
+   * Reparto de menús nuevo. Si llega, se escribe en la misma transacción
+   * que el resto: rompe el bloqueo cruzado entre `partySize` y `menuLineItems`
+   * (cada validación exigía que el otro ya estuviera alineado).
+   *
+   * Reglas:
+   *  - Si llega y la reserva ya tenía menús → se sustituye el reparto.
+   *  - Si llega vacío `[]` → se borra el reparto (queda sin menú detallado).
+   *  - Si NO llega → se mantiene el comportamiento previo (la suma del
+   *    reparto existente debe coincidir con el nuevo `partySize`).
+   */
+  menuLines?: MenuLineInput[];
 }
 
 export async function updateReservationDetails(
@@ -851,14 +863,37 @@ export async function updateReservationDetails(
     );
   }
 
-  const lines = reservation.menuLineItems;
-  if (lines && lines.length > 0) {
-    const sum = lines.reduce((s, l) => s + l.quantity, 0);
-    if (sum !== input.partySize) {
-      throw new ReservationMenuSelectionError(
-        "sum_mismatch",
-        `La suma de menús (${sum}) debe coincidir con comensales (${input.partySize}). Ajusta el reparto de menús en la sección correspondiente.`,
+  // Validación / construcción de menús ---------------------------------
+  // Tres caminos:
+  //  - `menuLines` indefinido  → no se tocan menús, pero la suma del
+  //    reparto existente debe casar con la nueva `partySize`.
+  //  - `menuLines === []`      → se borra el reparto (la reserva pasa a
+  //    no tener menú detallado).
+  //  - `menuLines.length > 0`  → se reescribe el reparto; debe sumar
+  //    `partySize` y respetar la carta vigente.
+  let nextMenuLineItems: ReservationRecord["menuLineItems"] | undefined;
+  if (input.menuLines !== undefined) {
+    if (input.menuLines.length === 0) {
+      nextMenuLineItems = [];
+    } else {
+      const menusConfig = await getMenusConfig();
+      nextMenuLineItems = buildMenuLineItemsForStaffUpdate(
+        input.menuLines,
+        menusConfig.offers,
+        input.partySize,
+        reservation.menuLineItems,
       );
+    }
+  } else {
+    const existing = reservation.menuLineItems;
+    if (existing && existing.length > 0) {
+      const sum = existing.reduce((s, l) => s + l.quantity, 0);
+      if (sum !== input.partySize) {
+        throw new ReservationMenuSelectionError(
+          "sum_mismatch",
+          `La suma de menús (${sum}) debe coincidir con comensales (${input.partySize}). Ajusta el reparto de menús en la sección correspondiente.`,
+        );
+      }
     }
   }
 
@@ -942,10 +977,28 @@ export async function updateReservationDetails(
     values[":pnot"] = "not_required";
   }
 
-  const removePrepay =
-    !stillNeedsPrepay && hadPrepayRecord
-      ? " REMOVE prepaymentAmountCents, prepaymentDeadlineAt, prepaymentProofS3Key, prepaymentProofFileName, prepaymentProofItems"
-      : "";
+  const removeParts: string[] = [];
+  if (!stillNeedsPrepay && hadPrepayRecord) {
+    removeParts.push(
+      "prepaymentAmountCents",
+      "prepaymentDeadlineAt",
+      "prepaymentProofS3Key",
+      "prepaymentProofFileName",
+      "prepaymentProofItems",
+    );
+  }
+
+  // Si llega `menuLines`, lo escribimos en el mismo Update. `[]` borra
+  // el atributo (DynamoDB no admite SET de array vacío como lista, así
+  // que en ese caso usamos REMOVE).
+  if (nextMenuLineItems !== undefined) {
+    if (nextMenuLineItems.length === 0) {
+      removeParts.push("menuLineItems");
+    } else {
+      setParts.push("menuLineItems = :mli");
+      values[":mli"] = nextMenuLineItems;
+    }
+  }
 
   if (input.systemMessage) {
     setParts.push(
@@ -955,6 +1008,9 @@ export async function updateReservationDetails(
     values[":r0"] = 0;
     values[":r1"] = 1;
   }
+
+  const removeClause =
+    removeParts.length > 0 ? ` REMOVE ${removeParts.join(", ")}` : "";
 
   const eventId = randomUUID();
   const event: ReservationEventRecord = {
@@ -990,7 +1046,7 @@ export async function updateReservationDetails(
       Update: {
         TableName: RESERVATIONS_TABLE_NAME,
         Key: { PK: reservation.PK, SK: reservation.SK },
-        UpdateExpression: `SET ${setParts.join(", ")}${removePrepay}`,
+        UpdateExpression: `SET ${setParts.join(", ")}${removeClause}`,
         ConditionExpression: "version = :expectedVersion",
         ExpressionAttributeNames: names,
         ExpressionAttributeValues: values,
@@ -998,6 +1054,27 @@ export async function updateReservationDetails(
     },
     { Put: { TableName: RESERVATIONS_TABLE_NAME, Item: event } },
   ];
+
+  // Evento adicional cuando cambiamos el reparto de menús, para que
+  // quede traza en el historial igual que en `updateReservationMenuLineItems`.
+  if (nextMenuLineItems !== undefined) {
+    const menuEventId = randomUUID();
+    const menuEvent: ReservationEventRecord = {
+      PK: reservation.PK,
+      SK: `EVT#${nowIso}#${menuEventId}`,
+      entityType: EVT_ENTITY,
+      eventId: menuEventId,
+      reservationId: reservation.reservationId,
+      kind: "menu_selection_changed",
+      meta: { lineCount: nextMenuLineItems.length },
+      publicToCustomer: true,
+      createdAt: nowIso,
+      createdBy: input.updatedBy,
+    };
+    transact.push({
+      Put: { TableName: RESERVATIONS_TABLE_NAME, Item: menuEvent },
+    });
+  }
 
   if (input.systemMessage) {
     const messageId = randomUUID();

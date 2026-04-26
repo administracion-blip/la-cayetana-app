@@ -175,6 +175,16 @@ export async function adminUpdateReservationDetails(
     reservationTime: string;
     expectedVersion: number;
     systemMessage?: string;
+    /**
+     * Reparto de menús nuevo. Opcional. Cuando se incluye, el endpoint
+     * lo escribe en la misma transacción que el resto, evitando el
+     * bloqueo cruzado entre comensales y menús.
+     */
+    menuLines?: {
+      offerId: string;
+      quantity: number;
+      mainPicks?: string[];
+    }[];
   },
 ): Promise<{ reservation: AdminReservationDto }> {
   return request(

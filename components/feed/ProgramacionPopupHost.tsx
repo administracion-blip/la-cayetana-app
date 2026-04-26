@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { ExpandableEventDescription } from "@/components/feed/ExpandableEventDescription";
 
 type PopupEvent = {
   id: string;
@@ -42,6 +43,8 @@ function markShownNow() {
 function formatStartAt(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
+  const wRaw = d.toLocaleDateString("es-ES", { weekday: "long" });
+  const weekday = wRaw.charAt(0).toUpperCase() + wRaw.slice(1);
   const date = d.toLocaleDateString("es-ES", {
     day: "numeric",
     month: "short",
@@ -51,7 +54,7 @@ function formatStartAt(iso: string): string {
     hour: "2-digit",
     minute: "2-digit",
   });
-  return `${date} · ${time}`;
+  return `${weekday}, ${date} · ${time}`;
 }
 
 /**
@@ -153,7 +156,7 @@ export function ProgramacionPopupHost() {
         </div>
         <div className="p-4">
           {when ? (
-            <p className="mb-1 text-xs font-medium text-muted">{when}</p>
+            <p className="mb-1 text-xs font-bold text-brand">{when}</p>
           ) : null}
           <h2
             id={titleId}
@@ -161,9 +164,10 @@ export function ProgramacionPopupHost() {
           >
             {event.title}
           </h2>
-          <p className="mt-2 whitespace-pre-line text-[15px] leading-relaxed text-muted">
-            {event.description}
-          </p>
+          <ExpandableEventDescription
+            key={event.description}
+            text={event.description}
+          />
         </div>
       </div>
     </div>

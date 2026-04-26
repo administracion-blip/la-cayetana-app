@@ -50,6 +50,7 @@ export async function POST(
       reservationTime: payload.reservationTime,
       updatedBy: `staff:${guard.user.id}`,
       systemMessage: payload.systemMessage || undefined,
+      menuLines: payload.menuLines,
     });
     return NextResponse.json({ reservation: serializeAdminReservation(updated) });
   } catch (err) {

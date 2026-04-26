@@ -7,6 +7,24 @@ import {
   mainCoursesForClientDisplay,
   mainPicksToCountsByOptions,
 } from "@/lib/reservation-menus-helpers";
+
+/**
+ * Reduce el reparto de raciones desde el último plato hacia el primero
+ * hasta que la suma sea `target`. Preserva el trabajo del usuario en
+ * lugar de resetear todo a cero cuando baja la cantidad de menús.
+ */
+function truncatePicksFromTail(counts: number[], target: number): number[] {
+  if (target < 0) return counts.map(() => 0);
+  let total = counts.reduce((a, b) => a + b, 0);
+  if (total <= target) return counts;
+  const next = [...counts];
+  for (let i = next.length - 1; i >= 0 && total > target; i -= 1) {
+    const take = Math.min(next[i] ?? 0, total - target);
+    next[i] = (next[i] ?? 0) - take;
+    total -= take;
+  }
+  return next;
+}
 import { adminUpdateReservationMenus, type AdminApiError } from "@/lib/admin-reservations/client";
 import type { AdminReservationDto, AdminMenusConfigDto } from "@/lib/serialization/reservations";
 
@@ -132,7 +150,7 @@ export function AdminReservationMenuEditor({
             ? mainPicksToCountsByOptions(options, raw)
             : new Array(options.length).fill(0);
           if (c.reduce((a, b) => a + b, 0) > q) {
-            c = new Array(options.length).fill(0);
+            c = truncatePicksFromTail(c, q);
           }
           out[offerId] = c;
           continue;
@@ -143,7 +161,7 @@ export function AdminReservationMenuEditor({
           c = out[offerId]!;
         }
         if (c.reduce((a, b) => a + b, 0) > q) {
-          out[offerId] = new Array(options.length).fill(0);
+          out[offerId] = truncatePicksFromTail(c, q);
         }
       }
       return out;

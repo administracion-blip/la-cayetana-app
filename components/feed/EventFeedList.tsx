@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { ExpandableEventDescription } from "@/components/feed/ExpandableEventDescription";
 import type { EventRecord } from "@/types/models";
 
 function sameLocalDay(a: Date, b: Date): boolean {
@@ -13,7 +14,10 @@ function sameLocalDay(a: Date, b: Date): boolean {
 
 function formatEvent(iso: string, today: Date) {
   const d = new Date(iso);
+  const wRaw = d.toLocaleDateString("es-ES", { weekday: "long" });
+  const weekday = wRaw.charAt(0).toUpperCase() + wRaw.slice(1);
   return {
+    weekday,
     date: d.toLocaleDateString("es-ES", {
       day: "numeric",
       month: "short",
@@ -52,7 +56,10 @@ export function EventFeedList({ events }: { events: EventRecord[] }) {
   return (
     <ul className="flex flex-col gap-4">
       {events.map((ev) => {
-        const { date, time, iso, isToday } = formatEvent(ev.startAt, today);
+        const { weekday, date, time, iso, isToday } = formatEvent(
+          ev.startAt,
+          today,
+        );
         return (
           <li
             key={ev.id}
@@ -68,8 +75,11 @@ export function EventFeedList({ events }: { events: EventRecord[] }) {
             </div>
             <div className="p-4">
               <div className="mb-2 flex flex-wrap items-center gap-2">
-                <time className="text-xs text-muted" dateTime={iso}>
-                  {date} · {time}
+                <time
+                  className="text-xs font-bold text-brand"
+                  dateTime={iso}
+                >
+                  {weekday}, {date} · {time}
                 </time>
                 {isToday ? (
                   <span className="inline-flex items-center rounded-full bg-pink-100 px-2 py-0.5 text-xs font-semibold text-pink-700 ring-1 ring-inset ring-pink-200">
@@ -78,9 +88,10 @@ export function EventFeedList({ events }: { events: EventRecord[] }) {
                 ) : null}
               </div>
               <h2 className="text-lg font-semibold leading-snug">{ev.title}</h2>
-              <p className="mt-2 whitespace-pre-line text-[15px] leading-relaxed text-muted">
-                {ev.description}
-              </p>
+              <ExpandableEventDescription
+                key={`${ev.id}|${ev.description}`}
+                text={ev.description}
+              />
             </div>
           </li>
         );

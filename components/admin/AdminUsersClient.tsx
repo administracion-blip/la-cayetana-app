@@ -877,12 +877,23 @@ export function AdminUsersClient({
           </div>
         );
       }
-      case "paidAmount":
+      case "paidAmount": {
+        const amount = u.paidAmount;
+        const n =
+          typeof amount === "number" && !Number.isNaN(amount) ? amount : null;
+        const isPositive = n != null && n > 0;
         return (
-          <span className="whitespace-nowrap font-mono text-[10px] leading-tight">
+          <span
+            className={
+              isPositive
+                ? "whitespace-nowrap font-mono text-[10px] font-bold leading-tight"
+                : "whitespace-nowrap font-mono text-[10px] leading-tight text-muted"
+            }
+          >
             {formatEuros(u.paidAmount)}
           </span>
         );
+      }
       case "paidAt": {
         if (!u.paidAt) {
           return <span className="text-muted">—</span>;
