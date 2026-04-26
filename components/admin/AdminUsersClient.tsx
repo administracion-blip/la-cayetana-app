@@ -80,6 +80,7 @@ type SortKey =
   | "birthYear"
   | "status"
   | "paidAmount"
+  | "paidAt"
   | "deliveryStatus"
   | "isAdmin"
   | "canValidatePrizes"
@@ -96,6 +97,7 @@ const COLUMNS: { key: SortKey; label: string }[] = [
   { key: "birthYear", label: "Año nac." },
   { key: "status", label: "Estado" },
   { key: "paidAmount", label: "Importe" },
+  { key: "paidAt", label: "F. pago" },
   { key: "deliveryStatus", label: "Entrega" },
   { key: "isAdmin", label: "Admin" },
   { key: "canValidatePrizes", label: "Validador" },
@@ -113,6 +115,7 @@ const DEFAULT_WIDTHS: Record<SortKey, number> = {
   birthYear: 58,
   status: 78,
   paidAmount: 70,
+  paidAt: 96,
   deliveryStatus: 138,
   isAdmin: 52,
   canValidatePrizes: 100,
@@ -193,6 +196,11 @@ function compareUsers(
       return a.status.localeCompare(b.status, "es") * mul;
     case "paidAmount":
       return ((a.paidAmount ?? 0) - (b.paidAmount ?? 0)) * mul;
+    case "paidAt": {
+      const ta = a.paidAt ? new Date(a.paidAt).getTime() : 0;
+      const tb = b.paidAt ? new Date(b.paidAt).getTime() : 0;
+      return (ta - tb) * mul;
+    }
     case "deliveryStatus":
       return (deliveryRank(a) - deliveryRank(b)) * mul;
     case "isAdmin": {
@@ -868,6 +876,24 @@ export function AdminUsersClient({
             {formatEuros(u.paidAmount)}
           </span>
         );
+      case "paidAt": {
+        if (!u.paidAt) {
+          return <span className="text-muted">—</span>;
+        }
+        const dt = new Date(u.paidAt);
+        if (Number.isNaN(dt.getTime())) {
+          return <span className="text-muted">—</span>;
+        }
+        const dateStr = dt.toLocaleDateString("es-ES");
+        return (
+          <span
+            className="whitespace-nowrap font-mono text-[10px] leading-tight text-muted"
+            title={dt.toLocaleString("es-ES")}
+          >
+            {dateStr}
+          </span>
+        );
+      }
       case "deliveryStatus": {
         if (u.status !== "active") {
           return <span className="text-muted">—</span>;
@@ -1377,6 +1403,10 @@ export function AdminUsersClient({
                 <dd className="mt-0.5">{cellValue(u, "paidAmount")}</dd>
               </div>
               <div>
+                <dt className="text-xs text-muted">F. pago</dt>
+                <dd className="mt-0.5">{cellValue(u, "paidAt")}</dd>
+              </div>
+              <div>
                 <dt className="text-xs text-muted">Sexo</dt>
                 <dd className="mt-0.5">{cellValue(u, "sex")}</dd>
               </div>
@@ -1615,7 +1645,10 @@ export function AdminUsersClient({
         backdropPointerEventsNone={
           pendingConfirm !== null || authDeniedOpen
         }
-        onClose={() => setScannedUserId(null)}
+        onClose={() => {
+          setScannedUserId(null);
+          setQ("");
+        }}
         onActivate={requestActivate}
         onDelivery={requestDelivery}
         onOpenPermissions={
