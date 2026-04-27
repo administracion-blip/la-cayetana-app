@@ -13,8 +13,21 @@ type Props = {
     phone: string | null;
     sex: SafeUser["sex"] | null;
     birthYear: number | null;
+    paidAmount: number | null;
+    paidAt: string | null;
   }) => void;
 };
+
+/** Pasa un ISO 8601 a `YYYY-MM-DD` para `<input type="date">` (zona local). */
+function isoToDateInputValue(iso: string | undefined | null): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
 
 /**
  * Modal para editar la ficha de un socio (nombre, teléfono, sexo, año).
@@ -28,6 +41,12 @@ export function EditUserProfileModal({ user, onClose, onSaved }: Props) {
   );
   const [birthYear, setBirthYear] = useState<string>(
     user.birthYear ? String(user.birthYear) : "",
+  );
+  const [paidAmount, setPaidAmount] = useState<string>(
+    typeof user.paidAmount === "number" ? String(user.paidAmount) : "",
+  );
+  const [paidAtDate, setPaidAtDate] = useState<string>(
+    isoToDateInputValue(user.paidAt),
   );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -62,6 +81,29 @@ export function EditUserProfileModal({ user, onClose, onSaved }: Props) {
       if ((user.birthYear ?? null) !== newYear) {
         body.birthYear = newYear;
       }
+      const trimmedPaidAmount = paidAmount.trim().replace(",", ".");
+      let nextPaidAmount: number | null;
+      if (trimmedPaidAmount === "") {
+        nextPaidAmount = null;
+      } else {
+        const parsed = Number(trimmedPaidAmount);
+        if (!Number.isFinite(parsed) || parsed < 0) {
+          setError("Importe pagado no válido");
+          setLoading(false);
+          return;
+        }
+        // Redondeo a céntimos para no propagar artefactos de coma flotante.
+        nextPaidAmount = Math.round(parsed * 100) / 100;
+      }
+      const currentPaidAmount =
+        typeof user.paidAmount === "number" ? user.paidAmount : null;
+      if (currentPaidAmount !== nextPaidAmount) {
+        body.paidAmountEuros = nextPaidAmount;
+      }
+      const currentPaidAtDate = isoToDateInputValue(user.paidAt);
+      if (currentPaidAtDate !== paidAtDate) {
+        body.paidAt = paidAtDate === "" ? null : paidAtDate;
+      }
       const res = await fetch(
         `/api/admin/users/${encodeURIComponent(user.id)}`,
         {
@@ -80,6 +122,8 @@ export function EditUserProfileModal({ user, onClose, onSaved }: Props) {
               phone: string | null;
               sex: SafeUser["sex"] | null;
               birthYear: number | null;
+              paidAmount: number | null;
+              paidAt: string | null;
             };
           }
         | null;
@@ -201,6 +245,48 @@ export function EditUserProfileModal({ user, onClose, onSaved }: Props) {
                 </option>
               ))}
             </select>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div>
+              <label
+                className="mb-1 block text-sm font-medium text-foreground"
+                htmlFor="edit-paid-amount"
+              >
+                Importe pagado (€)
+              </label>
+              <input
+                id="edit-paid-amount"
+                type="number"
+                min={0}
+                step={0.01}
+                inputMode="decimal"
+                value={paidAmount}
+                onChange={(e) => setPaidAmount(e.target.value)}
+                placeholder="0,00"
+                className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm outline-none ring-brand focus:ring-2"
+              />
+              <p className="mt-1 text-xs text-muted">
+                Vacío para borrar el importe.
+              </p>
+            </div>
+            <div>
+              <label
+                className="mb-1 block text-sm font-medium text-foreground"
+                htmlFor="edit-paid-at"
+              >
+                Fecha de pago
+              </label>
+              <input
+                id="edit-paid-at"
+                type="date"
+                value={paidAtDate}
+                onChange={(e) => setPaidAtDate(e.target.value)}
+                className="w-full rounded-xl border border-border bg-background px-3 py-2 text-sm outline-none ring-brand focus:ring-2"
+              />
+              <p className="mt-1 text-xs text-muted">
+                Vacío para borrar la fecha.
+              </p>
+            </div>
           </div>
           {error ? (
             <p

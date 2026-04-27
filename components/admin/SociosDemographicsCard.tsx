@@ -1,3 +1,5 @@
+"use client";
+
 import type { SociosDemographicsStats } from "@/lib/admin/socios-demographics";
 
 function fmtPct(p: number) {
@@ -120,13 +122,13 @@ type Props = {
 
 /**
  * Caja informativa (fondo azul pastel) con reparto por sexo y edad media.
- * Server component: recibe stats ya calculados.
+ * Recibe stats ya calculados (p. ej. sobre la vista filtrada de la tabla).
  */
 export function SociosDemographicsCard({ stats }: Props) {
   if (stats.kind === "empty") {
     return (
       <div className="mt-2 max-w-3xl rounded-xl border border-sky-200/90 bg-gradient-to-br from-sky-50 to-blue-50/90 px-3 py-3.5 text-center text-sm text-sky-900/70 shadow-sm">
-        No hay socios confirmados en el listado actual.
+        No hay filas en la vista actual (prueba a cambiar filtros o la búsqueda).
       </div>
     );
   }
@@ -179,7 +181,7 @@ export function SociosDemographicsCard({ stats }: Props) {
     <div
       className="mt-2 max-w-3xl rounded-xl border border-sky-200/90 bg-gradient-to-br from-sky-50 via-sky-50/95 to-indigo-50/80 p-3 shadow-sm"
       role="region"
-      aria-label="Resumen demográfico de socios confirmados"
+      aria-label="Resumen demográfico de la vista del listado"
     >
       <div className="mb-2 flex flex-wrap items-center gap-1.5">
         <div className="flex items-center gap-1.5 text-sky-900">
@@ -187,7 +189,7 @@ export function SociosDemographicsCard({ stats }: Props) {
           <h2 className="text-sm font-semibold">Resumen del listado</h2>
         </div>
         <span className="rounded-full border border-sky-200/80 bg-white/70 px-2 py-0.5 text-[11px] font-medium tabular-nums text-sky-800">
-          {total} {total === 1 ? "socio" : "socios"}
+          {total} {total === 1 ? "persona en vista" : "personas en vista"}
         </span>
       </div>
 
@@ -239,8 +241,8 @@ export function SociosDemographicsCard({ stats }: Props) {
             {age.withBirthYear === 0
               ? "Sin año de nacimiento en ficha."
               : `Basada en ${age.withBirthYear} ${
-                  age.withBirthYear === 1 ? "socio" : "socios"
-                } con año de nacimiento.`}
+                  age.withBirthYear === 1 ? "persona" : "personas"
+                } con año de nacimiento en esta vista.`}
           </p>
         </div>
       </div>

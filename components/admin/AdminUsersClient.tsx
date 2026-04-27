@@ -15,7 +15,9 @@ import {
   userCanReceiveBonoDelivery,
   userHasPaidThisYear,
 } from "@/lib/membership";
+import { getSociosDemographicsStats } from "@/lib/admin/socios-demographics";
 import type { UserRecord } from "@/types/models";
+import { ActivateUserDialog } from "./ActivateUserDialog";
 import { AdminAuthDeniedDialog } from "./AdminAuthDeniedDialog";
 import { AdminConfirmDialog } from "./AdminConfirmDialog";
 import { EditUserProfileModal } from "./EditUserProfileModal";
@@ -23,6 +25,7 @@ import { InviteMemberModal } from "./InviteMemberModal";
 import { QrScannerModal } from "./QrScannerModal";
 import { ScanNoMatchDialog } from "./ScanNoMatchDialog";
 import { UserPermissionsModal } from "./UserPermissionsModal";
+import { SociosDemographicsCard } from "./SociosDemographicsCard";
 import { UserQuickSheet } from "./UserQuickSheet";
 
 /**
@@ -348,6 +351,11 @@ export function AdminUsersClient({
     return copy;
   }, [filtered, sortKey, sortDir]);
 
+  const tableDemographicsStats = useMemo(
+    () => getSociosDemographicsStats(sorted),
+    [sorted],
+  );
+
   const selectedInViewCount = useMemo(
     () => sorted.filter((u) => selectedIds.has(u.id)).length,
     [sorted, selectedIds],
@@ -473,16 +481,27 @@ export function AdminUsersClient({
     };
   }, []);
 
-  const runActivate = useCallback(async (user: SafeUser): Promise<boolean> => {
+  const runActivate = useCallback(
+    async (
+      user: SafeUser,
+      opts?: { paidAmountEuros?: number | null },
+    ): Promise<boolean> => {
     setError(null);
     setPendingId(user.id);
     try {
+      // Si el admin deja el campo vacío (`null`) no enviamos el campo al API
+      // para mantener el comportamiento previo (no registrar importe). Si
+      // lo escribió (incluido 0), se envía explícitamente.
+      const body: Record<string, number> = {};
+      if (typeof opts?.paidAmountEuros === "number") {
+        body.paidAmountEuros = opts.paidAmountEuros;
+      }
       const res = await fetch(
         `/api/admin/users/${encodeURIComponent(user.id)}/activate`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({}),
+          body: JSON.stringify(body),
         },
       );
       const data = (await res.json().catch(() => null)) as
@@ -1094,6 +1113,7 @@ export function AdminUsersClient({
 
   return (
     <div>
+      <SociosDemographicsCard stats={tableDemographicsStats} />
       <div className="mb-4 flex flex-wrap items-end gap-4">
         <div className="flex-1 min-w-[260px]">
           <label className="mb-2 block text-sm text-muted" htmlFor="search">
@@ -1692,52 +1712,22 @@ export function AdminUsersClient({
       ) : null}
 
       {pendingConfirm?.kind === "activate" ? (
-        <AdminConfirmDialog
-          title={
+        <ActivateUserDialog
+          user={pendingConfirm.user}
+          mode={
             pendingConfirm.user.status === "pending_payment"
-              ? "Activar socio"
-              : "Renovar"
-          }
-          confirmLabel={
-            pendingConfirm.user.status === "pending_payment"
-              ? "Activar"
-              : "Confirmar renovación"
+              ? "activate"
+              : "renew"
           }
           onCancel={() => setPendingConfirm(null)}
-          onConfirm={() => {
+          onConfirm={({ paidAmountEuros }) => {
             const u = pendingConfirm.user;
             setPendingConfirm(null);
             window.setTimeout(() => {
-              void runActivate(u);
+              void runActivate(u, { paidAmountEuros });
             }, 0);
           }}
-        >
-          {pendingConfirm.user.status === "pending_payment" ? (
-            <>
-              ¿Confirmas el pago y activas a{" "}
-              <strong className="text-foreground">{pendingConfirm.user.name}</strong>
-              ? Se le asignará un carnet (CY) y podrá iniciar sesión.
-            </>
-          ) : (
-            <>
-              ¿Confirmas la renovación de{" "}
-              <strong className="text-foreground">{pendingConfirm.user.name}</strong>
-              ? Se actualizará la fecha de pago de este año.
-              {pendingConfirm.user.paidAt ? (
-                <>
-                  {" "}
-                  Último pago registrado:{" "}
-                  <span className="text-foreground">
-                    {new Date(pendingConfirm.user.paidAt).toLocaleDateString(
-                      "es-ES",
-                    )}
-                  </span>
-                  .
-                </>
-              ) : null}
-            </>
-          )}
-        </AdminConfirmDialog>
+        />
       ) : pendingConfirm?.kind === "delivery" ? (
         <AdminConfirmDialog
           title="Marcar bono como entregado"
@@ -1842,6 +1832,14 @@ export function AdminUsersClient({
                         phone: updated.phone ?? undefined,
                         sex: updated.sex ?? undefined,
                         birthYear: updated.birthYear ?? undefined,
+                        paidAmount:
+                          updated.paidAmount === null
+                            ? undefined
+                            : updated.paidAmount,
+                        paidAt:
+                          updated.paidAt === null
+                            ? undefined
+                            : updated.paidAt,
                       }
                     : row,
                 ),

@@ -58,7 +58,23 @@ export async function PATCH(
     );
   }
 
-  const { name, phone, sex, birthYear } = parsed.data;
+  const { name, phone, sex, birthYear, paidAmountEuros, paidAt } = parsed.data;
+
+  /**
+   * Normaliza `YYYY-MM-DD` a un ISO completo (mediodía UTC) para que en
+   * cualquier zona horaria se vea como ese día. Si ya viene un ISO completo
+   * lo dejamos tal cual.
+   */
+  function normalizePaidAt(input: string | null | undefined): string | null | undefined {
+    if (input === undefined) return undefined;
+    if (input === null || input === "") return null;
+    const datePart = /^\d{4}-\d{2}-\d{2}$/;
+    if (datePart.test(input)) {
+      return new Date(`${input}T12:00:00.000Z`).toISOString();
+    }
+    return input;
+  }
+
   await updateUserFieldsById(id, {
     ...(name !== undefined ? { name } : {}),
     ...(phone !== undefined
@@ -67,6 +83,12 @@ export async function PATCH(
     ...(sex !== undefined ? { sex: sex ?? null } : {}),
     ...(birthYear !== undefined
       ? { birthYear: birthYear ?? null }
+      : {}),
+    ...(paidAmountEuros !== undefined
+      ? { paidAmount: paidAmountEuros }
+      : {}),
+    ...(paidAt !== undefined
+      ? { paidAt: normalizePaidAt(paidAt) ?? null }
       : {}),
   });
 
@@ -86,6 +108,8 @@ export async function PATCH(
       phone: updated.phone ?? null,
       sex: updated.sex ?? null,
       birthYear: updated.birthYear ?? null,
+      paidAmount: updated.paidAmount ?? null,
+      paidAt: updated.paidAt ?? null,
     },
   });
 }

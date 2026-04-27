@@ -32,15 +32,17 @@ export type SociosDemographicsStats =
       };
     };
 
+/** Filas con al menos sexo y año de nacimiento (p. ej. `SafeUser`). */
+export type SociosDemographicsRow = Pick<UserRecord, "sex" | "birthYear">;
+
 /**
- * Estadísticas de sexo (%) y edad media para socios confirmados
- * (`entityType === USER`). Los borradores se excluyen.
+ * Estadísticas de sexo (%) y edad media sobre el conjunto de filas pasado
+ * (p. ej. la vista filtrada y ordenada de la tabla de administración).
  */
 export function getSociosDemographicsStats(
-  users: UserRecord[],
+  users: readonly SociosDemographicsRow[],
 ): SociosDemographicsStats {
-  const socios = users.filter((u) => u.entityType === "USER");
-  const n = socios.length;
+  const n = users.length;
   if (n === 0) {
     return { kind: "empty" };
   }
@@ -52,7 +54,7 @@ export function getSociosDemographicsStats(
   let sexUnknown = 0;
   const ages: number[] = [];
 
-  for (const s of socios) {
+  for (const s of users) {
     const sx = s.sex;
     if (sx === "male") male += 1;
     else if (sx === "female") female += 1;

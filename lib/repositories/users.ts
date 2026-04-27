@@ -20,6 +20,7 @@ import {
 } from "@/lib/constants";
 import { getDocClient } from "@/lib/dynamo";
 import { getEnv } from "@/lib/env";
+import { sendWelcomeRegistrationEmail } from "@/lib/email/transactional";
 import {
   bonoDeliveryBlockMessage,
   bonoDeliveryBlockReason,
@@ -590,6 +591,11 @@ export class ManualActivationError extends Error {
  * 50 = 50,00 €). Por compatibilidad histórica también se acepta
  * `paidAmountCents` (céntimos), que se convierte a euros antes de persistir.
  *
+ * Tras activar un **alta nueva** o un socio **inactivo/pendiente**, si aún no
+ * se había enviado, se dispara el correo de bienvenida (`sendWelcomeRegistrationEmail`)
+ * y se marca `welcomeEmailSent`. No se envía en **renovaciones** de un socio
+ * que ya estaba `active` (solo se actualiza `paidAt` del año en curso).
+ *
  * TODO: cuando volvamos a tener webhook/automatización, llamar a esta función
  * también desde `activateUserFromCheckoutSession` en lugar de duplicar lógica.
  */
@@ -729,7 +735,34 @@ export async function activateUserManually(input: {
   if (!updated) {
     throw new ManualActivationError("No se pudo activar al usuario");
   }
-  return { user: updated, justActivated: true };
+
+  const isAnnualRenewal =
+    existing.status === "active" &&
+    existing.entityType === USER_ENTITY_TYPE;
+
+  let userOut = updated;
+  if (
+    !isAnnualRenewal &&
+    updated.membershipId &&
+    updated.welcomeEmailSent !== true
+  ) {
+    try {
+      const sent = await sendWelcomeRegistrationEmail({
+        toEmail: updated.email,
+        name: updated.name,
+        membershipId: updated.membershipId,
+        phone: updated.phone,
+      });
+      if (sent) {
+        await markWelcomeEmailSent(updated.id);
+        userOut = { ...updated, welcomeEmailSent: true };
+      }
+    } catch (e) {
+      console.error("[activateUserManually] correo bienvenida", e);
+    }
+  }
+
+  return { user: userOut, justActivated: true };
 }
 
 export async function markWelcomeEmailSent(userId: string): Promise<void> {
@@ -946,6 +979,16 @@ export type AdminUserPatch = {
   sex?: UserSex | null;
   /** Año de nacimiento. `null` elimina el atributo. */
   birthYear?: number | null;
+  /**
+   * Importe pagado de la última cuota en EUROS. `null` elimina `paidAmount` y
+   * `paidCurrency`; un número fija ambos (currency siempre EUR).
+   */
+  paidAmount?: number | null;
+  /**
+   * Fecha del pago en ISO 8601 completo. `null` elimina el atributo. La
+   * conversión desde `YYYY-MM-DD` la hace el caller (route handler).
+   */
+  paidAt?: string | null;
   status?: UserStatus;
   exportedToAgora?: boolean;
   isAdmin?: boolean;
@@ -1018,6 +1061,29 @@ export async function updateUserFieldsById(
       names["#by"] = "birthYear";
       values[":by"] = patch.birthYear;
       setParts.push("#by = :by");
+    }
+  }
+  if (patch.paidAmount !== undefined) {
+    if (patch.paidAmount === null) {
+      // Borrar importe implica borrar también la moneda asociada para no
+      // dejar huérfana una `paidCurrency = "EUR"` sin importe.
+      removeAttrs.push("paidAmount", "paidCurrency");
+    } else {
+      names["#pAmount"] = "paidAmount";
+      values[":pAmount"] = patch.paidAmount;
+      setParts.push("#pAmount = :pAmount");
+      names["#pCurrency"] = "paidCurrency";
+      values[":pCurrency"] = "EUR";
+      setParts.push("#pCurrency = :pCurrency");
+    }
+  }
+  if (patch.paidAt !== undefined) {
+    if (patch.paidAt === null) {
+      removeAttrs.push("paidAt");
+    } else {
+      names["#paidAt"] = "paidAt";
+      values[":paidAt"] = patch.paidAt;
+      setParts.push("#paidAt = :paidAt");
     }
   }
   if (patch.status !== undefined) {

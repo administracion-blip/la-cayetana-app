@@ -149,7 +149,8 @@ export const acceptInviteSchema = z
 
 /**
  * Cuerpo del PATCH `/api/admin/users/:id`. Edición restringida a campos de
- * ficha (no toca permisos ni email). Usar `null` para borrar `phone`.
+ * ficha (no toca permisos ni email). Usar `null` para borrar `phone`,
+ * `paidAmountEuros` o `paidAt`.
  */
 export const adminUserProfilePatchSchema = z
   .object({
@@ -165,6 +166,25 @@ export const adminUserProfilePatchSchema = z
           .int()
           .min(MIN_BIRTH_YEAR, { message: "Año fuera de rango" })
           .max(MAX_BIRTH_YEAR, { message: "Debes ser mayor de 18 años" }),
+        z.null(),
+      ])
+      .optional(),
+    /** Importe pagado en EUROS (50 = 50,00 €). `null` borra el campo. */
+    paidAmountEuros: z
+      .union([z.coerce.number().nonnegative().max(100_000), z.null()])
+      .optional(),
+    /**
+     * Fecha del pago. Aceptamos `YYYY-MM-DD` (lo más cómodo desde el form),
+     * un ISO 8601 completo o `null`/`""` para borrar. La normalización a ISO
+     * la hace el route handler.
+     */
+    paidAt: z
+      .union([
+        z
+          .string()
+          .trim()
+          .regex(/^\d{4}-\d{2}-\d{2}(T.*)?$/, { message: "Fecha inválida" }),
+        z.literal(""),
         z.null(),
       ])
       .optional(),
