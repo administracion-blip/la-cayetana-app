@@ -9,7 +9,9 @@
     "start": "next start",
     "lint": "eslint",
     "hash:password": "node scripts/hash-password.mjs",
-    "seed:test-user": "node --env-file=.env.local scripts/seed-test-user.mjs"
+    "seed:test-user": "node --env-file=.env.local scripts/seed-test-user.mjs",
+    "email:test": "node --env-file=.env.local scripts/send-test-email.mjs",
+    "email:welcome": "node --env-file=.env.local scripts/send-test-email.mjs welcome"
   },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.1032.0",

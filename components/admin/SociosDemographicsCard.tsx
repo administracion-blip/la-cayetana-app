@@ -9,6 +9,15 @@ function fmtPct(p: number) {
   });
 }
 
+const EUR_FMT = new Intl.NumberFormat("es-ES", {
+  style: "currency",
+  currency: "EUR",
+});
+
+function fmtEuro(amount: number): string {
+  return EUR_FMT.format(amount);
+}
+
 function IconChart() {
   return (
     <svg
@@ -128,12 +137,15 @@ export function SociosDemographicsCard({ stats }: Props) {
   if (stats.kind === "empty") {
     return (
       <div className="mt-2 max-w-3xl rounded-xl border border-sky-200/90 bg-gradient-to-br from-sky-50 to-blue-50/90 px-3 py-3.5 text-center text-sm text-sky-900/70 shadow-sm">
-        No hay filas en la vista actual (prueba a cambiar filtros o la búsqueda).
+        <p>No hay filas en la vista actual (prueba a cambiar filtros o la búsqueda).</p>
+        <p className="mt-2 text-xs font-medium tabular-nums text-sky-800/90">
+          Suma importes en vista: {fmtEuro(0)} · Carnets con importe &gt; 0: 0
+        </p>
       </div>
     );
   }
 
-  const { total, sex, age } = stats;
+  const { total, sex, age, paidSum, paidPositiveCount } = stats;
   const rows = [
     {
       key: "female",
@@ -181,7 +193,7 @@ export function SociosDemographicsCard({ stats }: Props) {
     <div
       className="mt-2 max-w-3xl rounded-xl border border-sky-200/90 bg-gradient-to-br from-sky-50 via-sky-50/95 to-indigo-50/80 p-3 shadow-sm"
       role="region"
-      aria-label="Resumen demográfico de la vista del listado"
+      aria-label="Resumen demográfico y de importes de la vista del listado"
     >
       <div className="mb-2 flex flex-wrap items-center gap-1.5">
         <div className="flex items-center gap-1.5 text-sky-900">
@@ -190,6 +202,19 @@ export function SociosDemographicsCard({ stats }: Props) {
         </div>
         <span className="rounded-full border border-sky-200/80 bg-white/70 px-2 py-0.5 text-[11px] font-medium tabular-nums text-sky-800">
           {total} {total === 1 ? "persona en vista" : "personas en vista"}
+        </span>
+        <span
+          className="rounded-full border border-emerald-200/80 bg-emerald-50/80 px-2 py-0.5 text-[11px] font-medium tabular-nums text-emerald-900/90"
+          title="Suma de la columna importe (solo valores numéricos) en filas visibles"
+        >
+          Importe: {fmtEuro(paidSum)}
+        </span>
+        <span
+          className="rounded-full border border-amber-200/85 bg-amber-50/90 px-2 py-0.5 text-[11px] font-medium tabular-nums text-amber-950/90"
+          title="Filas en vista con importe estrictamente mayor que cero"
+        >
+          Vendidos: {paidPositiveCount}{" "}
+          {paidPositiveCount === 1 ? "carnet" : "carnets"}
         </span>
       </div>
 

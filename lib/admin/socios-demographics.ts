@@ -19,6 +19,10 @@ export type SociosDemographicsStats =
   | {
       kind: "ok";
       total: number;
+      /** Suma de `paidAmount` (solo valores numéricos finitos) en la vista. */
+      paidSum: number;
+      /** Filas en vista con `paidAmount` numérico y &gt; 0. */
+      paidPositiveCount: number;
       sex: {
         female: { count: number; pct: number };
         male: { count: number; pct: number };
@@ -32,8 +36,11 @@ export type SociosDemographicsStats =
       };
     };
 
-/** Filas con al menos sexo y año de nacimiento (p. ej. `SafeUser`). */
-export type SociosDemographicsRow = Pick<UserRecord, "sex" | "birthYear">;
+/** Filas con sexo, año de nacimiento e importe (p. ej. `SafeUser`). */
+export type SociosDemographicsRow = Pick<
+  UserRecord,
+  "sex" | "birthYear" | "paidAmount"
+>;
 
 /**
  * Estadísticas de sexo (%) y edad media sobre el conjunto de filas pasado
@@ -53,6 +60,8 @@ export function getSociosDemographicsStats(
   let preferNot = 0;
   let sexUnknown = 0;
   const ages: number[] = [];
+  let paidSum = 0;
+  let paidPositiveCount = 0;
 
   for (const s of users) {
     const sx = s.sex;
@@ -63,6 +72,12 @@ export function getSociosDemographicsStats(
 
     if (validBirthYear(s.birthYear, year)) {
       ages.push(year - s.birthYear!);
+    }
+
+    const p = s.paidAmount;
+    if (typeof p === "number" && Number.isFinite(p)) {
+      paidSum += p;
+      if (p > 0) paidPositiveCount += 1;
     }
   }
 
@@ -77,6 +92,8 @@ export function getSociosDemographicsStats(
   return {
     kind: "ok",
     total: n,
+    paidSum: Math.round(paidSum * 100) / 100,
+    paidPositiveCount,
     sex: {
       female: { count: female, pct: pct(female) },
       male: { count: male, pct: pct(male) },
