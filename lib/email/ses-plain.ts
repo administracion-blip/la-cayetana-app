@@ -17,6 +17,8 @@ export async function sendSesPlainTextEmail(params: {
   to: string;
   subject: string;
   body: string;
+  /** Si se indica, SES envía multipart alternativo HTML + texto plano. */
+  htmlBody?: string;
 }): Promise<SesPlainTextEmailResult> {
   let from: string | undefined;
   try {
@@ -45,7 +47,12 @@ export async function sendSesPlainTextEmail(params: {
         Destination: { ToAddresses: [params.to] },
         Message: {
           Subject: { Data: params.subject, Charset: "UTF-8" },
-          Body: { Text: { Data: params.body, Charset: "UTF-8" } },
+          Body: params.htmlBody
+            ? {
+                Text: { Data: params.body, Charset: "UTF-8" },
+                Html: { Data: params.htmlBody, Charset: "UTF-8" },
+              }
+            : { Text: { Data: params.body, Charset: "UTF-8" } },
         },
       }),
     );

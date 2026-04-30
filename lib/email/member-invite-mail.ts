@@ -1,3 +1,4 @@
+import { buildMemberInviteEmailParts } from "@/lib/email/member-invite-templates";
 import type { SesPlainTextEmailResult } from "@/lib/email/ses-plain";
 import { sendSesPlainTextEmail } from "@/lib/email/ses-plain";
 
@@ -14,25 +15,16 @@ export async function sendMemberInviteEmail(input: {
   inviterName: string;
   recipientName?: string;
 }): Promise<SesPlainTextEmailResult> {
-  const greeting = input.recipientName?.trim()
-    ? `Hola, ${input.recipientName.trim()},`
-    : "Hola,";
-  const body = [
-    greeting,
-    "",
-    `${input.inviterName} te ha invitado a unirte como socio de La Cayetana.`,
-    "",
-    "Completa tu alta abriendo este enlace (válido 7 días):",
-    input.inviteUrl,
-    "",
-    "Si no esperabas esta invitación, ignora el correo.",
-    "",
-    "— La Cayetana · Granada",
-  ].join("\n");
+  const { subject, text, html } = buildMemberInviteEmailParts({
+    inviteUrl: input.inviteUrl,
+    inviterName: input.inviterName,
+    recipientName: input.recipientName,
+  });
 
   return sendSesPlainTextEmail({
     to: input.toEmail,
-    subject: "Tu invitación de socio — La Cayetana",
-    body,
+    subject,
+    body: text,
+    htmlBody: html,
   });
 }
