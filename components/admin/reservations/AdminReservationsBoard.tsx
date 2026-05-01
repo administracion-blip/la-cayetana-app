@@ -9,9 +9,14 @@ import {
   useState,
   type FormEvent,
 } from "react";
+import {
+  formatAmountEuros,
+  formatRelativeTimestamp,
+} from "@/components/reservations/formatters";
 import { ReservationStatusBadge } from "@/components/reservations/ReservationStatusBadge";
 import {
   adminGetReservationsSummary,
+  adminListNotes,
   adminListReservations,
   adminSetReservationTable,
   type AdminApiError,
@@ -21,8 +26,11 @@ import {
   DEFAULT_TIMEZONE,
   formatLocalDate,
 } from "@/lib/datetime";
-import type { AdminReservationDto } from "@/lib/serialization/reservations";
-import type { ReservationStatus } from "@/types/models";
+import type {
+  AdminReservationDto,
+  ReservationNoteDto,
+} from "@/lib/serialization/reservations";
+import type { PrepaymentStatus, ReservationStatus } from "@/types/models";
 
 type Filter = "active" | "today" | "tomorrow" | "by_status" | "by_date";
 
@@ -393,7 +401,7 @@ export function AdminReservationsBoard({
               <div
                 key={r.reservationId}
                 className="flex max-sm:items-start max-sm:gap-1 sm:grid
-                  sm:grid-cols-[minmax(0,4.25rem)_1fr_auto_2.75rem] sm:items-start
+                  sm:grid-cols-[minmax(0,4.25rem)_1fr_auto_auto] sm:items-start
                   sm:gap-2 sm:py-3
                   py-2.5 text-sm transition
                   [transition-property:color,box-shadow,background] hover:bg-muted/30"
@@ -502,9 +510,11 @@ export function AdminReservationsBoard({
                   </div>
                 </Link>
                 <div
-                  className="relative max-sm:shrink-0 sm:min-w-0 sm:pt-0.5"
+                  className="relative flex items-center gap-1.5 max-sm:shrink-0 sm:min-w-0 sm:pt-0.5"
                   onClick={(e) => e.stopPropagation()}
                 >
+                  <BoardNotesCell r={r} />
+                  <BoardPrepaymentCell r={r} />
                   <BoardMesaCell
                     r={r}
                     peerDayRows={rows}
@@ -745,6 +755,404 @@ function BoardMesaCell({
         </>
       ) : null}
     </div>
+  );
+}
+
+const PREPAY_STATUS_LABELS: Record<PrepaymentStatus, string> = {
+  not_required: "No aplica",
+  pending_instructions: "Pendiente de enviar instrucciones",
+  awaiting_transfer: "Esperando transferencia",
+  received: "Recibida",
+  refunded: "Devuelta",
+};
+
+function useEscapeKey(enabled: boolean, onClose: () => void) {
+  useEffect(() => {
+    if (!enabled) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        onClose();
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [enabled, onClose]);
+}
+
+/**
+ * Botón pequeño de notas con indicador visual cuando la reserva tiene
+ * nota del cliente. Al abrir, muestra un modal con la nota del cliente y
+ * las notas internas (solo lectura; para añadir, se entra a la ficha).
+ */
+function BoardNotesCell({ r }: { r: AdminReservationDto }) {
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [notes, setNotes] = useState<ReservationNoteDto[] | null>(null);
+
+  const hasClientNote = !!r.notes?.trim();
+
+  const close = useCallback(() => {
+    setOpen(false);
+    setError(null);
+  }, []);
+
+  useEscapeKey(open, close);
+
+  const loadNotes = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const { notes: fetched } = await adminListNotes(r.reservationId);
+      setNotes(fetched);
+    } catch (err) {
+      const a = err as AdminApiError;
+      setError(a?.message ?? "No se pudieron cargar las notas");
+    } finally {
+      setLoading(false);
+    }
+  }, [r.reservationId]);
+
+  const handleOpen = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setOpen(true);
+      void loadNotes();
+    },
+    [loadNotes],
+  );
+
+  const hasInternalNotes = (notes?.length ?? 0) > 0;
+
+  return (
+    <>
+      <button
+        type="button"
+        title={hasClientNote ? "Ver notas (el cliente dejó una)" : "Ver notas"}
+        aria-label="Ver notas"
+        onClick={handleOpen}
+        className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-lg
+          border-2 border-border bg-white text-foreground shadow-sm transition
+          hover:border-brand/50 hover:bg-muted/30 active:scale-[0.98]"
+      >
+        <svg
+          width="18"
+          height="18"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden
+        >
+          <path d="M4 4h12l4 4v12H4z" />
+          <path d="M16 4v4h4" />
+          <path d="M8 12h8" />
+          <path d="M8 16h5" />
+        </svg>
+        {hasClientNote ? (
+          <span
+            className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full border border-white bg-amber-500"
+            aria-hidden
+          />
+        ) : null}
+      </button>
+
+      {open ? (
+        <>
+          <div
+            className="fixed inset-0 z-[120] touch-none bg-black/35"
+            aria-hidden
+            onClick={close}
+          />
+          <div
+            className="fixed left-1/2 top-1/2 z-[130] w-[min(28rem,92vw)]
+              -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-border
+              bg-white p-4 shadow-xl animate-in fade-in zoom-in-95
+              max-h-[85vh] overflow-y-auto"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={`notes-dialog-${r.reservationId}`}
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <h3
+                  id={`notes-dialog-${r.reservationId}`}
+                  className="text-sm font-semibold text-foreground"
+                >
+                  Notas de la reserva
+                </h3>
+                <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                  {r.contact.name} · {r.reservationDate} · {r.reservationTime}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={close}
+                className="rounded-full px-2 py-1 text-xs text-muted hover:bg-muted/30"
+                aria-label="Cerrar"
+              >
+                ✕
+              </button>
+            </div>
+
+            <section className="mt-3">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">
+                Nota del cliente
+              </p>
+              {hasClientNote ? (
+                <p className="mt-1 whitespace-pre-wrap rounded-xl border border-border bg-muted/30 p-3 text-sm text-foreground">
+                  {r.notes}
+                </p>
+              ) : (
+                <p className="mt-1 text-xs text-muted">
+                  El cliente no ha dejado nota.
+                </p>
+              )}
+            </section>
+
+            <section className="mt-4">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">
+                Notas internas
+              </p>
+              {loading ? (
+                <p className="mt-1 text-xs text-muted">Cargando…</p>
+              ) : error ? (
+                <p className="mt-1 text-xs text-rose-700" role="alert">
+                  {error}
+                </p>
+              ) : hasInternalNotes ? (
+                <ul className="mt-2 space-y-2">
+                  {(notes ?? [])
+                    .slice()
+                    .reverse()
+                    .map((n) => (
+                      <li
+                        key={n.noteId}
+                        className="rounded-xl border border-border bg-muted/20 p-3 text-sm"
+                      >
+                        <p className="whitespace-pre-wrap">{n.body}</p>
+                        <p className="mt-1 text-[11px] text-muted">
+                          {n.createdByDisplayName} ·{" "}
+                          {formatRelativeTimestamp(n.createdAt)}
+                        </p>
+                      </li>
+                    ))}
+                </ul>
+              ) : (
+                <p className="mt-1 text-xs text-muted">Sin notas internas.</p>
+              )}
+            </section>
+
+            <div className="mt-4 flex justify-end">
+              <Link
+                href={`/admin/reservas/${r.reservationId}`}
+                className="rounded-full border border-border bg-white px-3 py-1.5 text-xs font-medium
+                  text-foreground hover:bg-muted/30"
+                onClick={close}
+              >
+                Abrir ficha para añadir/editar notas
+              </Link>
+            </div>
+          </div>
+        </>
+      ) : null}
+    </>
+  );
+}
+
+/**
+ * Botón pequeño con el importe de la señal. Solo se muestra si la reserva
+ * tiene señal solicitada. Al abrir, expone un modal de solo lectura con
+ * estado, plazo, instrucciones, justificantes (con enlaces) y total
+ * recibido.
+ */
+function BoardPrepaymentCell({ r }: { r: AdminReservationDto }) {
+  const [open, setOpen] = useState(false);
+
+  const close = useCallback(() => setOpen(false), []);
+  useEscapeKey(open, close);
+
+  if (!r.prepaymentAmountCents || r.prepaymentAmountCents <= 0) return null;
+
+  const handleOpen = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setOpen(true);
+  };
+
+  const statusLabel = PREPAY_STATUS_LABELS[r.prepaymentStatus];
+  const deadline = r.prepaymentDeadlineAt
+    ? new Date(r.prepaymentDeadlineAt).toLocaleString("es-ES")
+    : null;
+  const receivedAt = r.prepaymentReceivedAt
+    ? new Date(r.prepaymentReceivedAt).toLocaleString("es-ES")
+    : null;
+
+  const proofItems = r.prepaymentProofItems ?? [];
+  const totalReceived = r.prepaymentTotalReceivedCents ?? 0;
+
+  return (
+    <>
+      <button
+        type="button"
+        title={`Señal ${formatAmountEuros(r.prepaymentAmountCents)} · ${statusLabel}`}
+        aria-label={`Señal: ${formatAmountEuros(r.prepaymentAmountCents)}`}
+        onClick={handleOpen}
+        className={`flex h-10 shrink-0 items-center justify-center rounded-lg border-2 px-2
+          text-xs font-semibold tabular-nums shadow-sm transition active:scale-[0.98]
+          ${
+            r.prepaymentStatus === "received"
+              ? "border-emerald-300 bg-emerald-50 text-emerald-900 hover:bg-emerald-100"
+              : r.prepaymentStatus === "refunded"
+                ? "border-rose-300 bg-rose-50 text-rose-900 hover:bg-rose-100"
+                : "border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100"
+          }`}
+      >
+        {formatAmountEuros(r.prepaymentAmountCents)}
+      </button>
+
+      {open ? (
+        <>
+          <div
+            className="fixed inset-0 z-[120] touch-none bg-black/35"
+            aria-hidden
+            onClick={close}
+          />
+          <div
+            className="fixed left-1/2 top-1/2 z-[130] w-[min(28rem,92vw)]
+              -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-border
+              bg-white p-4 shadow-xl animate-in fade-in zoom-in-95
+              max-h-[85vh] overflow-y-auto"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={`prepay-dialog-${r.reservationId}`}
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <h3
+                  id={`prepay-dialog-${r.reservationId}`}
+                  className="text-sm font-semibold text-foreground"
+                >
+                  Prepago / señal
+                </h3>
+                <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                  {r.contact.name} · {r.reservationDate} · {r.reservationTime}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={close}
+                className="rounded-full px-2 py-1 text-xs text-muted hover:bg-muted/30"
+                aria-label="Cerrar"
+              >
+                ✕
+              </button>
+            </div>
+
+            <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2 text-sm">
+              <dt className="text-xs text-muted">Importe solicitado</dt>
+              <dd className="text-right font-semibold tabular-nums text-foreground">
+                {formatAmountEuros(r.prepaymentAmountCents)}
+              </dd>
+              <dt className="text-xs text-muted">Estado</dt>
+              <dd className="text-right font-medium text-foreground">
+                {statusLabel}
+              </dd>
+              {deadline ? (
+                <>
+                  <dt className="text-xs text-muted">Plazo</dt>
+                  <dd className="text-right text-foreground">{deadline}</dd>
+                </>
+              ) : null}
+              {receivedAt ? (
+                <>
+                  <dt className="text-xs text-muted">Recibida</dt>
+                  <dd className="text-right text-foreground">{receivedAt}</dd>
+                </>
+              ) : null}
+              {totalReceived > 0 ? (
+                <>
+                  <dt className="text-xs text-muted">Total cobrado</dt>
+                  <dd className="text-right font-semibold tabular-nums text-emerald-900">
+                    {formatAmountEuros(totalReceived)}
+                  </dd>
+                </>
+              ) : null}
+            </dl>
+
+            {r.prepaymentInstructions ? (
+              <section className="mt-4">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">
+                  Instrucciones enviadas
+                </p>
+                <p className="mt-1 whitespace-pre-wrap rounded-xl border border-border bg-muted/20 p-3 text-xs text-foreground">
+                  {r.prepaymentInstructions}
+                </p>
+              </section>
+            ) : null}
+
+            {proofItems.length > 0 ? (
+              <section className="mt-4">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">
+                  Justificantes
+                </p>
+                <ul className="mt-1.5 space-y-1.5">
+                  {proofItems.map((p) => {
+                    const href = `/api/admin/reservations/${encodeURIComponent(
+                      r.reservationId,
+                    )}/prepayment/proof${
+                      p.proofId && p.proofId !== "legacy"
+                        ? `?proofId=${encodeURIComponent(p.proofId)}`
+                        : ""
+                    }`;
+                    return (
+                      <li
+                        key={p.proofId}
+                        className="flex items-baseline justify-between gap-2 rounded-lg border border-border bg-muted/20 px-2.5 py-1.5 text-xs"
+                      >
+                        <a
+                          href={href}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="min-w-0 truncate font-medium text-brand underline"
+                          title={p.fileName}
+                        >
+                          {p.fileName}
+                        </a>
+                        <span className="shrink-0 tabular-nums text-foreground">
+                          {p.amountCents > 0
+                            ? formatAmountEuros(p.amountCents)
+                            : "—"}
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </section>
+            ) : null}
+
+            <div className="mt-4 flex justify-end">
+              <Link
+                href={`/admin/reservas/${r.reservationId}`}
+                className="rounded-full border border-border bg-white px-3 py-1.5 text-xs font-medium
+                  text-foreground hover:bg-muted/30"
+                onClick={close}
+              >
+                Abrir ficha
+              </Link>
+            </div>
+          </div>
+        </>
+      ) : null}
+    </>
   );
 }
 

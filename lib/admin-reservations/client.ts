@@ -227,6 +227,17 @@ export async function adminAddNote(
   );
 }
 
+/** Lista las notas internas de una reserva (solo staff con permiso de ver). */
+export async function adminListNotes(
+  id: string,
+): Promise<{ notes: ReservationNoteDto[] }> {
+  return request(
+    `/api/admin/reservations/${encodeURIComponent(id)}/notes`,
+    { method: "GET", cache: "no-store" },
+    "No se pudieron obtener las notas",
+  );
+}
+
 /** Marca señal devuelta (JSON). */
 export async function adminUpdatePrepayment(
   id: string,
