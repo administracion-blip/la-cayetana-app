@@ -156,9 +156,18 @@ export function AdminReservationsBoard({
       // "today" resuelve en el servidor con la misma zona que el GSI by-date
       // (ver GET /api/admin/reservations?date=today); evita mezclar días con
       // new Date() en el navegador.
-      else if (filter === "today") args.date = "today";
-      else if (filter === "tomorrow") args.date = "tomorrow";
-      else if (filter === "by_date") args.date = selectedDate;
+      // Con `date` hay que enviar `status` para que el API cruce día ∩ estado
+      // (solo entonces filtra); si no, el listado incluye todos los estados.
+      else if (filter === "today") {
+        args.date = "today";
+        args.status = ACTIVE_STATUSES;
+      } else if (filter === "tomorrow") {
+        args.date = "tomorrow";
+        args.status = ACTIVE_STATUSES;
+      } else if (filter === "by_date") {
+        args.date = selectedDate;
+        args.status = ACTIVE_STATUSES;
+      }
       if (debouncedQuery.trim()) args.q = debouncedQuery.trim();
       args.year = year;
       const [data, summary] = await Promise.all([
@@ -384,16 +393,28 @@ export function AdminReservationsBoard({
         </div>
       ) : null}
 
-      {grouped.map(([date, rows]) => (
+      {grouped.map(([date, rows]) => {
+        const dayCovers = rows.reduce((sum, r) => sum + r.partySize, 0);
+        return (
         <section
           key={date}
           className="rounded-2xl border border-border bg-white p-3 shadow-sm sm:p-5"
         >
-          <h2 className="mb-3 min-w-0 break-words text-sm font-semibold leading-snug text-foreground first-letter:uppercase">
-            {formatDateLong(date)}
-            <span className="ml-2 font-normal text-muted">
+          <h2
+            className="mb-3 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1.5 text-sm font-semibold
+              leading-snug text-foreground first-letter:uppercase"
+          >
+            <span className="min-w-0 break-words">{formatDateLong(date)}</span>
+            <span className="font-normal text-muted">
               · {rows.length}{" "}
               {rows.length === 1 ? "reserva" : "reservas"}
+            </span>
+            <span
+              className="inline-flex shrink-0 items-center rounded-full border border-pink-200/95 bg-pink-50/95
+                px-2.5 py-1 text-[11px] font-semibold tabular-nums text-pink-950 shadow-sm"
+              title="Suma de comensales (pax) de las reservas visibles este día"
+            >
+              {dayCovers} comensales
             </span>
           </h2>
           <div className="divide-y divide-border">
@@ -525,7 +546,8 @@ export function AdminReservationsBoard({
             ))}
           </div>
         </section>
-      ))}
+        );
+      })}
     </div>
   );
 }
