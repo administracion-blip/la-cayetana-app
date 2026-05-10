@@ -32,6 +32,13 @@ const contactSchema = z.object({
 });
 
 /**
+ * Tope en Zod para `partySize` en alta y edición admin.
+ * Debe ser ≥ al `maxPartySize` permitido en slots (`slotsSchema` admite hasta 500).
+ * El rango real por sitio lo acota el servidor con `getSlotsConfig()`.
+ */
+const RESERVATION_PARTY_SIZE_SCHEMA_MAX = 500;
+
+/**
  * Payload aceptado por `POST /api/reservations`.
  *  - Socio logueado: `contact` puede omitirse → se usa el del perfil.
  *  - Guest: `contact` es obligatorio.
@@ -41,13 +48,20 @@ const menuLineSchema = z.object({
   offerId: z.string().trim().min(1).max(80),
   quantity: z.coerce.number().int().min(0).max(500),
   /** Un principal por ración de ese menú; obligatorio vía lógica de negocio si el menú tiene opciones. */
-  mainPicks: z.array(z.string().max(200)).max(50).optional(),
+  mainPicks: z
+    .array(z.string().max(200))
+    .max(RESERVATION_PARTY_SIZE_SCHEMA_MAX)
+    .optional(),
 });
 
 export const createReservationSchema = z.object({
   reservationDate: dateStrSchema,
   reservationTime: timeStrSchema,
-  partySize: z.coerce.number().int().min(1).max(50),
+  partySize: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(RESERVATION_PARTY_SIZE_SCHEMA_MAX),
   notes: trimmed(0, 1000).optional().or(z.literal("")),
   contact: contactSchema.optional(),
   /** Cantidades por menú; con ofertas activas, en servidor la suma debe ser partySize. */
@@ -139,7 +153,11 @@ export const adminReservationScheduleSchema = z.object({
  */
 export const adminReservationDetailsSchema = z.object({
   contact: contactSchema,
-  partySize: z.coerce.number().int().min(1).max(50),
+  partySize: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(RESERVATION_PARTY_SIZE_SCHEMA_MAX),
   reservationDate: dateStrSchema,
   reservationTime: timeStrSchema,
   expectedVersion: z.coerce.number().int().nonnegative(),

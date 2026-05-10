@@ -83,3 +83,29 @@ export function mainPicksToCountsByOptions(
   }
   return counts;
 }
+
+/**
+ * Texto único para listar los principales de una línea de menú cuando el snapshot
+ * repite el nombre (una fila por ración): agrupa por nombre (clave en minúsculas)
+ * y ordena por frecuencia descendente.
+ * Ej.: `["Solomillo", "Solomillo"]` → "Solomillo × 2"
+ */
+export function formatMainCoursesSnapshotLabel(
+  snapshot: string[] | undefined | null,
+): string {
+  const counts = new Map<string, { display: string; n: number }>();
+  for (const raw of snapshot ?? []) {
+    const t = String(raw).trim();
+    if (!t) continue;
+    const key = t.toLowerCase();
+    const prev = counts.get(key);
+    if (prev) prev.n += 1;
+    else counts.set(key, { display: t, n: 1 });
+  }
+  const rows = Array.from(counts.values())
+    .filter((x) => x.n > 0)
+    .sort(
+      (a, b) => b.n - a.n || a.display.localeCompare(b.display, "es"),
+    );
+  return rows.map((x) => `${x.display} × ${x.n}`).join(" · ");
+}

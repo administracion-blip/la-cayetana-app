@@ -15,6 +15,7 @@ import {
   sendReservationMessage,
   type ReservationsApiError,
 } from "@/lib/reservations/client";
+import { formatMainCoursesSnapshotLabel } from "@/lib/reservation-menus-helpers";
 import type {
   ReservationDto,
   ReservationEventDto,
@@ -220,9 +221,14 @@ export function ReservationDetailView({
                   <span className="font-medium">
                     {line.nameSnapshot} × {line.quantity}
                   </span>
-                  {line.mainCoursesSnapshot.length > 0 ? (
+                  {(line.mainCoursesSnapshot ?? []).some((x) =>
+                    String(x).trim(),
+                  ) ? (
                     <span className="block text-xs text-muted">
-                      Principales: {line.mainCoursesSnapshot.join(" · ")}
+                      Principales:{" "}
+                      {formatMainCoursesSnapshotLabel(
+                        line.mainCoursesSnapshot,
+                      )}
                     </span>
                   ) : null}
                   <span className="text-xs text-muted">

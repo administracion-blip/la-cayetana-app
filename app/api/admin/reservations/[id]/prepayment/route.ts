@@ -2,7 +2,9 @@ import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import { z } from "zod";
+import { createGuestToken } from "@/lib/auth/reservations";
 import { requireReservationStaffForApi } from "@/lib/auth/reservation-admin";
+import { sendCustomerStatusChangedEmail } from "@/lib/email/reservations-mail";
 import { getDocClient } from "@/lib/dynamo";
 import { requireReservationsEnv } from "@/lib/env";
 import { deleteObject } from "@/lib/s3";
@@ -12,6 +14,7 @@ import {
 } from "@/lib/prepayment-proof-upload";
 import { sniffUploadOrWarn } from "@/lib/upload/sniff";
 import {
+  getGuestById,
   ReservationConflictError,
   ReservationNotFoundError,
   getReservationById,
@@ -19,7 +22,7 @@ import {
 } from "@/lib/repositories/reservations";
 import { serializeAdminReservation } from "@/lib/serialization/reservations";
 import { adminReservationPrepaymentSchema } from "@/lib/validation-reservations";
-import type { PrepaymentProofItem } from "@/types/models";
+import type { PrepaymentProofItem, ReservationRecord } from "@/types/models";
 
 export const dynamic = "force-dynamic";
 
@@ -209,6 +212,7 @@ export async function POST(
         prepaymentProofItems,
         systemMessage: "Hemos recibido tu señal. ¡Reserva confirmada!",
       });
+      notifyCustomerOfStatusChange(updated);
       return NextResponse.json({
         reservation: serializeAdminReservation(updated),
       });
@@ -318,5 +322,34 @@ export async function POST(
   }
   return NextResponse.json({
     reservation: serializeAdminReservation(refreshed),
+  });
+}
+
+/**
+ * Avisa al cliente por email tras marcar la señal como recibida (estado
+ * pasa a `confirmed`). Mismo patrón que `/status`: corre fuera del camino
+ * de respuesta para no retrasar la UI admin y, si la reserva es de guest,
+ * regenera un magic-link con la nueva `sessionVersion`.
+ */
+function notifyCustomerOfStatusChange(reservation: ReservationRecord): void {
+  (async () => {
+    let guestToken: string | undefined;
+    if (reservation.guestId) {
+      const guest = await getGuestById(reservation.guestId);
+      if (guest) {
+        guestToken = await createGuestToken({
+          guestId: guest.guestId,
+          sessionVersion: guest.sessionVersion,
+          email: guest.emailNormalized,
+        });
+      }
+    }
+    await sendCustomerStatusChangedEmail({
+      reservation,
+      newStatus: reservation.status,
+      guestToken,
+    });
+  })().catch((err) => {
+    console.error("[admin][prepayment][email]", err);
   });
 }

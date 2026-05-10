@@ -17,6 +17,7 @@ import {
   type MenuLinesEditorState,
 } from "@/components/admin/reservations/MenuLinesInlineEditor";
 import { ReservationStatusBadge } from "@/components/reservations/ReservationStatusBadge";
+import { formatMainCoursesSnapshotLabel } from "@/lib/reservation-menus-helpers";
 import {
   adminAddNote,
   adminAppendPrepaymentProofs,
@@ -567,21 +568,9 @@ function Summary({
           </span>
           <ul className="mt-2 list-inside list-disc space-y-2">
             {reservation.menuLineItems.map((line) => {
-              const counts = new Map<string, { display: string; n: number }>();
-              for (const raw of line.mainCoursesSnapshot ?? []) {
-                const t = String(raw).trim();
-                if (!t) continue;
-                const key = t.toLowerCase();
-                const prev = counts.get(key);
-                if (prev) prev.n += 1;
-                else counts.set(key, { display: t, n: 1 });
-              }
-              const mainRows = Array.from(counts.values())
-                .filter((x) => x.n > 0)
-                .sort(
-                  (a, b) =>
-                    b.n - a.n || a.display.localeCompare(b.display, "es"),
-                );
+              const mainsLabel = formatMainCoursesSnapshotLabel(
+                line.mainCoursesSnapshot,
+              );
               return (
                 <li key={line.offerId}>
                   <span className="font-medium">
@@ -591,12 +580,9 @@ function Summary({
                     {" "}
                     · {formatAmountEuros(line.priceCents * line.quantity)}
                   </span>
-                  {mainRows.length > 0 ? (
+                  {mainsLabel ? (
                     <p className="mt-1 pl-5 text-xs leading-snug text-muted-foreground">
-                      Principales:{" "}
-                      {mainRows
-                        .map((x) => `${x.display} × ${x.n}`)
-                        .join(" · ")}
+                      Principales: {mainsLabel}
                     </p>
                   ) : null}
                 </li>
