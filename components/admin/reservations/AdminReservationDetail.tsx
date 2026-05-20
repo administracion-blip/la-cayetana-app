@@ -868,9 +868,20 @@ function ActionsPanel({
 
   const canMarkPrepaymentReceived =
     reservation.prepaymentStatus !== "received" &&
-    reservation.prepaymentStatus !== "refunded";
+    reservation.prepaymentStatus !== "refunded" &&
+    !(
+      reservation.prepaymentStatus === "awaiting_transfer" &&
+      reservation.prepaymentProofItems.length > 0
+    );
+  // Permite añadir/quitar justificantes con la señal recibida o cuando
+  // pasó a `awaiting_transfer` por ampliación de comensales y ya hay
+  // comprobantes previos (así el admin puede subir la diferencia sin
+  // perder los anteriores).
   const canEditPrepayProofs =
-    permissions.canManage && reservation.prepaymentStatus === "received";
+    permissions.canManage &&
+    (reservation.prepaymentStatus === "received" ||
+      (reservation.prepaymentStatus === "awaiting_transfer" &&
+        reservation.prepaymentProofItems.length > 0));
 
   useEffect(() => {
     setNewStatus(reservation.status);
@@ -1146,6 +1157,27 @@ function ActionsPanel({
           <p className="text-[11px] font-medium uppercase tracking-wide text-muted">
             Prepago
           </p>
+          {(() => {
+            const requested = reservation.prepaymentAmountCents ?? 0;
+            const received = reservation.prepaymentTotalReceivedCents ?? 0;
+            const hasProofs =
+              reservation.prepaymentProofItems.length > 0 || received > 0;
+            if (!hasProofs || received >= requested) return null;
+            const shortfall = requested - received;
+            return (
+              <div
+                role="alert"
+                className="mt-1.5 rounded-lg border border-rose-300 bg-rose-50 p-2 text-[11px] text-rose-900"
+              >
+                <p className="font-semibold">Falta importe en la señal</p>
+                <p className="mt-0.5">
+                  Cobrado {formatAmountEuros(received)} de{" "}
+                  {formatAmountEuros(requested)}. Pendiente:{" "}
+                  {formatAmountEuros(shortfall)}.
+                </p>
+              </div>
+            );
+          })()}
           {reservation.prepaymentProofItems.length > 0 ? (
             <ul className="mt-1.5 list-none space-y-1 text-[11px] text-muted">
               {reservation.prepaymentProofItems.map((p) => {

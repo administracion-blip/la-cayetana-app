@@ -972,6 +972,21 @@ export async function updateReservationDetails(
   if (stillNeedsPrepay && hadPrepayRecord) {
     setParts.push("prepaymentAmountCents = :pamt");
     values[":pamt"] = newPrepayTotal;
+
+    // Si la señal estaba dada por recibida pero la nueva cantidad pedida
+    // supera lo cobrado realmente (suma de justificantes), volvemos al
+    // estado "pendiente de transferencia" para evitar mostrar como
+    // recibido un importe que no se ha cobrado. Si al ampliar comensales
+    // el cliente paga la diferencia (o se baja partySize) y vuelve a
+    // cubrirse, `appendPrepaymentProofs` lo restaurará a `received`.
+    if (reservation.prepaymentStatus === "received") {
+      const totalReceivedCents = (reservation.prepaymentProofItems ?? [])
+        .reduce((sum, p) => sum + (p.amountCents ?? 0), 0);
+      if (totalReceivedCents < newPrepayTotal) {
+        setParts.push("prepaymentStatus = :pUnder");
+        values[":pUnder"] = "awaiting_transfer";
+      }
+    }
   } else if (!stillNeedsPrepay && hadPrepayRecord) {
     setParts.push("prepaymentStatus = :pnot");
     values[":pnot"] = "not_required";
@@ -1257,8 +1272,11 @@ export interface AppendPrepaymentProofsInput {
 }
 
 /**
- * Añade comprobantes a una reserva que ya tiene señal recibida.
- * Migra un justificante legacy a `prepaymentProofItems` al fusionar.
+ * Añade comprobantes a una reserva con señal pedida (`received` o
+ * `awaiting_transfer` cuando el cliente debe cubrir una diferencia tras
+ * ampliar comensales). Migra un justificante legacy a
+ * `prepaymentProofItems` al fusionar. Si tras añadir el total cubre el
+ * importe pedido, restaura `prepaymentStatus = "received"`.
  */
 export async function appendPrepaymentProofs(
   input: AppendPrepaymentProofsInput,
@@ -1271,9 +1289,12 @@ export async function appendPrepaymentProofs(
   if (reservation.version !== input.expectedVersion) {
     throw new ReservationConflictError();
   }
-  if (reservation.prepaymentStatus !== "received") {
+  if (
+    reservation.prepaymentStatus !== "received" &&
+    reservation.prepaymentStatus !== "awaiting_transfer"
+  ) {
     throw new Error(
-      "Solo se pueden añadir comprobantes con la señal ya recibida.",
+      "Solo se pueden añadir comprobantes con la señal pedida (recibida o pendiente de transferencia).",
     );
   }
   const { items: existing, hadLegacyOnly } =
@@ -1307,6 +1328,24 @@ export async function appendPrepaymentProofs(
   };
   if (hadLegacyOnly) {
     updateExpr += " REMOVE prepaymentProofS3Key, prepaymentProofFileName";
+  }
+  // Si la reserva estaba en "esperando transferencia" (p. ej. el admin
+  // amplió comensales tras una señal recibida) y ahora los justificantes
+  // cubren el importe pedido, vuelve a `received` automáticamente.
+  if (
+    reservation.prepaymentStatus === "awaiting_transfer" &&
+    reservation.prepaymentAmountCents != null
+  ) {
+    const mergedTotal = merged.reduce(
+      (sum, p) => sum + (p.amountCents ?? 0),
+      0,
+    );
+    if (mergedTotal >= reservation.prepaymentAmountCents) {
+      updateExpr += ", prepaymentStatus = :pRecv, prepaymentReceivedAt = :pra, prepaymentReceivedByUserId = :prb";
+      values[":pRecv"] = "received";
+      values[":pra"] = reservation.prepaymentReceivedAt ?? nowIso;
+      values[":prb"] = reservation.prepaymentReceivedByUserId ?? input.updatedBy;
+    }
   }
 
   const transact: TransactItems = [
@@ -1353,9 +1392,12 @@ export async function removePrepaymentProof(
   if (reservation.version !== input.expectedVersion) {
     throw new ReservationConflictError();
   }
-  if (reservation.prepaymentStatus !== "received") {
+  if (
+    reservation.prepaymentStatus !== "received" &&
+    reservation.prepaymentStatus !== "awaiting_transfer"
+  ) {
     throw new Error(
-      "Solo se pueden quitar comprobantes con la señal en estado recibida.",
+      "Solo se pueden quitar comprobantes con la señal pedida (recibida o pendiente de transferencia).",
     );
   }
   const { items } = getPrepaymentItemsForEdit(reservation);
@@ -1394,14 +1436,30 @@ export async function removePrepaymentProof(
     ":ub": input.updatedBy,
     ":expected": input.expectedVersion,
   };
+  // Si tras quitar el justificante el total cobrado deja de cubrir el
+  // importe pedido, bajamos `prepaymentStatus` a `awaiting_transfer`
+  // para reflejar que la señal ya no está completa.
+  const remainingTotal = items.reduce(
+    (sum, p) => sum + (p.amountCents ?? 0),
+    0,
+  );
+  const requested = reservation.prepaymentAmountCents ?? 0;
+  const downgradeToAwaiting =
+    reservation.prepaymentStatus === "received" &&
+    requested > 0 &&
+    remainingTotal < requested;
+  const setStatusFragment = downgradeToAwaiting
+    ? ", prepaymentStatus = :pAwait"
+    : "";
   const updateExpression =
     items.length > 0
-      ? "SET prepaymentProofItems = :ppi, version = :next, updatedAt = :u, updatedBy = :ub"
-      : "SET version = :next, updatedAt = :u, updatedBy = :ub REMOVE prepaymentProofItems, prepaymentProofS3Key, prepaymentProofFileName";
-  const expressionValues: Record<string, unknown> =
-    items.length > 0
-      ? { ...baseValues, ":ppi": items }
-      : baseValues;
+      ? `SET prepaymentProofItems = :ppi, version = :next, updatedAt = :u, updatedBy = :ub${setStatusFragment}`
+      : `SET version = :next, updatedAt = :u, updatedBy = :ub${setStatusFragment} REMOVE prepaymentProofItems, prepaymentProofS3Key, prepaymentProofFileName`;
+  const expressionValues: Record<string, unknown> = {
+    ...baseValues,
+    ...(items.length > 0 ? { ":ppi": items } : {}),
+    ...(downgradeToAwaiting ? { ":pAwait": "awaiting_transfer" } : {}),
+  };
 
   const transact: TransactItems = [
     {

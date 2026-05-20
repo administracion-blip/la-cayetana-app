@@ -22,7 +22,10 @@ const MAX_PROOF_FILES = 15;
 
 /**
  * `POST /api/admin/reservations/:id/prepayment/append` (multipart)
- * Añade comprobantes con importe; la señal debe estar ya en `received`.
+ * Añade comprobantes con importe; la señal debe estar en `received` o
+ * `awaiting_transfer` (cuando hay que cubrir una diferencia tras
+ * ampliar comensales). Si tras añadir el total cobrado cubre el
+ * importe pedido, el repo restaura `prepaymentStatus = "received"`.
  */
 export async function POST(
   request: Request,

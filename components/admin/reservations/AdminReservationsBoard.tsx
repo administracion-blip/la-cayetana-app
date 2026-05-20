@@ -1018,25 +1018,44 @@ function BoardPrepaymentCell({ r }: { r: AdminReservationDto }) {
 
   const proofItems = r.prepaymentProofItems ?? [];
   const totalReceived = r.prepaymentTotalReceivedCents ?? 0;
+  const hasProofs = proofItems.length > 0 || totalReceived > 0;
+  const isUnderpaid = hasProofs && totalReceived < r.prepaymentAmountCents;
+  const shortfallCents = isUnderpaid
+    ? r.prepaymentAmountCents - totalReceived
+    : 0;
 
   return (
     <>
       <button
         type="button"
-        title={`Señal ${formatAmountEuros(r.prepaymentAmountCents)} · ${statusLabel}`}
+        title={
+          isUnderpaid
+            ? `Señal ${formatAmountEuros(r.prepaymentAmountCents)} · ${statusLabel} · faltan ${formatAmountEuros(shortfallCents)}`
+            : `Señal ${formatAmountEuros(r.prepaymentAmountCents)} · ${statusLabel}`
+        }
         aria-label={`Señal: ${formatAmountEuros(r.prepaymentAmountCents)}`}
         onClick={handleOpen}
-        className={`flex h-10 shrink-0 items-center justify-center rounded-lg border-2 px-2
+        className={`relative flex h-10 shrink-0 items-center justify-center rounded-lg border-2 px-2
           text-xs font-semibold tabular-nums shadow-sm transition active:scale-[0.98]
           ${
-            r.prepaymentStatus === "received"
-              ? "border-emerald-300 bg-emerald-50 text-emerald-900 hover:bg-emerald-100"
-              : r.prepaymentStatus === "refunded"
-                ? "border-rose-300 bg-rose-50 text-rose-900 hover:bg-rose-100"
-                : "border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100"
+            isUnderpaid
+              ? "border-rose-300 bg-rose-50 text-rose-900 hover:bg-rose-100"
+              : r.prepaymentStatus === "received"
+                ? "border-emerald-300 bg-emerald-50 text-emerald-900 hover:bg-emerald-100"
+                : r.prepaymentStatus === "refunded"
+                  ? "border-rose-300 bg-rose-50 text-rose-900 hover:bg-rose-100"
+                  : "border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100"
           }`}
       >
         {formatAmountEuros(r.prepaymentAmountCents)}
+        {isUnderpaid ? (
+          <span
+            aria-hidden
+            className="absolute -right-1 -top-1 inline-flex h-4 w-4 items-center justify-center rounded-full border border-white bg-rose-600 text-[10px] font-bold leading-none text-white"
+          >
+            !
+          </span>
+        ) : null}
       </button>
 
       {open ? (
@@ -1078,6 +1097,20 @@ function BoardPrepaymentCell({ r }: { r: AdminReservationDto }) {
                 ✕
               </button>
             </div>
+
+            {isUnderpaid ? (
+              <div
+                role="alert"
+                className="mt-3 rounded-xl border border-rose-300 bg-rose-50 p-2.5 text-xs text-rose-900"
+              >
+                <p className="font-semibold">Falta importe en la señal</p>
+                <p className="mt-0.5">
+                  Cobrado {formatAmountEuros(totalReceived)} de{" "}
+                  {formatAmountEuros(r.prepaymentAmountCents)} solicitados.
+                  Diferencia pendiente: {formatAmountEuros(shortfallCents)}.
+                </p>
+              </div>
+            ) : null}
 
             <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2 text-sm">
               <dt className="text-xs text-muted">Importe solicitado</dt>
