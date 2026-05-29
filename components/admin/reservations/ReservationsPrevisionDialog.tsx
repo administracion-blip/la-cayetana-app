@@ -6,6 +6,7 @@ import {
   type AdminApiError,
   type AdminReservationsForecast,
 } from "@/lib/admin-reservations/client";
+import { downloadForecastPdf } from "@/lib/admin-reservations/forecast-pdf";
 import {
   formatRelativeDayTag,
   formatReservationDateLong,
@@ -41,6 +42,7 @@ export function ReservationsPrevisionDialog({ open, onClose }: Props) {
   const [forecastDay, setForecastDay] = useState(() =>
     formatLocalDate(new Date(), DEFAULT_TIMEZONE),
   );
+  const [pdfBusy, setPdfBusy] = useState(false);
 
   const todayStr = useMemo(
     () => formatLocalDate(new Date(), DEFAULT_TIMEZONE),
@@ -73,10 +75,34 @@ export function ReservationsPrevisionDialog({ open, onClose }: Props) {
     void load(forecastDay);
   }, [open, forecastDay, load]);
 
-  if (!open) return null;
+  const relTag = useMemo(
+    () => formatRelativeDayTag(forecastDay, todayStr),
+    [forecastDay, todayStr],
+  );
+  const longDate = useMemo(
+    () => capitalize(formatReservationDateLong(forecastDay)),
+    [forecastDay],
+  );
+  const statusScopeLabel = useMemo(
+    () => data?.statusScope.map((s) => STATUS_LABEL[s] ?? s).join(" · ") ?? "",
+    [data?.statusScope],
+  );
 
-  const relTag = formatRelativeDayTag(forecastDay, todayStr);
-  const longDate = capitalize(formatReservationDateLong(forecastDay));
+  const handleDownloadPdf = useCallback(async () => {
+    if (!data) return;
+    setPdfBusy(true);
+    try {
+      await downloadForecastPdf(data, {
+        longDate,
+        relTag,
+        statusScopeLabel,
+      });
+    } finally {
+      setPdfBusy(false);
+    }
+  }, [data, longDate, relTag, statusScopeLabel]);
+
+  if (!open) return null;
 
   return (
     <div
@@ -147,9 +173,7 @@ export function ReservationsPrevisionDialog({ open, onClose }: Props) {
             </div>
             <p className="mt-1 text-xs text-muted-foreground">
               Reservas con fecha de servicio en este día, estados:{" "}
-              {data?.statusScope
-                .map((s) => STATUS_LABEL[s] ?? s)
-                .join(" · ")}
+              {statusScopeLabel || "—"}
             </p>
             <p className="text-xs text-muted-foreground">
               Sin datos personales: solo comensales, menús y platos.
@@ -290,6 +314,14 @@ export function ReservationsPrevisionDialog({ open, onClose }: Props) {
             max-lg:pb-[max(0.75rem,env(safe-area-inset-bottom,0px))]
             px-4 py-3 sm:px-5"
         >
+          <button
+            type="button"
+            onClick={() => void handleDownloadPdf()}
+            disabled={loading || pdfBusy || !data}
+            className="rounded-full border border-border bg-white px-4 py-2 text-sm font-medium transition hover:bg-muted/30 disabled:opacity-50"
+          >
+            {pdfBusy ? "Generando PDF…" : "Descargar PDF"}
+          </button>
           <button
             type="button"
             onClick={() => void load(forecastDay)}
