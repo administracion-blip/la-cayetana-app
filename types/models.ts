@@ -165,6 +165,24 @@ export interface UserRecord {
    */
   canAccessAdminProgramacion?: boolean;
   /**
+   * Acceso a Administración · RRHH (`/admin/rrhh`): fichas de trabajadores,
+   * cuadrantes y fichajes. Las acciones de edición requieren además
+   * `canManageRrhh`.
+   */
+  canAccessAdminRrhh?: boolean;
+  /**
+   * Gestión de RRHH: editar fichas (incluidos datos sensibles), crear
+   * cuadrantes y registrar/corregir fichajes. Implica el acceso de lectura.
+   */
+  canManageRrhh?: boolean;
+  /**
+   * Marca a esta cuenta como trabajador del local. Independiente de los
+   * permisos de administración: un trabajador entra a su cuenta para ver su
+   * cuadrante y mostrar el QR de fichaje. La ficha laboral y los datos
+   * sensibles viven en la tabla de RRHH, no aquí.
+   */
+  isWorker?: boolean;
+  /**
    * Permite enviar invitaciones de alta a nuevos socios desde el panel.
    * El invitado completa sus datos sin pasar por Stripe y queda en
    * `active` automáticamente al aceptar la invitación.
@@ -1084,4 +1102,231 @@ export interface ReservationMenuLineItem {
   nameSnapshot: string;
   priceCents: number;
   mainCoursesSnapshot: string[];
+}
+
+// ─── RRHH (cuadrantes, fichas de trabajadores y fichajes) ─────────────────
+
+/** `entityType` de cada ítem de `RRHH_TABLE_NAME` (discriminante). */
+export type RrhhEntityType =
+  | "RRHH_WORKER_INVITE"
+  | "RRHH_WORKER_PROFILE"
+  | "RRHH_WORKER_DOCUMENT"
+  | "RRHH_ACCESS_LOG"
+  | "RRHH_SHIFT"
+  | "RRHH_CONFIG"
+  | "RRHH_POSITIONS"
+  | "RRHH_CLOCK";
+
+/**
+ * Invitación para dar de alta a un trabajador. Vive en `RRHH_TABLE_NAME`.
+ *  - `PK = "WINVITE#<tokenHash>"`, `SK = "META"`.
+ * El token en claro viaja por email; aquí solo guardamos su hash SHA-256.
+ * `ttlEpoch` permite que DynamoDB la limpie automáticamente al caducar.
+ */
+export interface RrhhWorkerInviteRecord {
+  PK: `WINVITE#${string}`;
+  SK: "META";
+  entityType: "RRHH_WORKER_INVITE";
+  email: string;
+  name?: string;
+  phone?: string;
+  invitedByUserId: string;
+  createdAt: string;
+  /** ISO de expiración (lógica en código). */
+  expiresAt: string;
+  /** Epoch en segundos para el atributo TTL nativo de DynamoDB. */
+  ttlEpoch: number;
+  /**
+   * Id del usuario creado al completar el alta. Una vez fijado, la invitación
+   * ya no puede crear otra cuenta, pero sigue autorizando la subida de
+   * documentos (DNI) hasta que caduque por TTL.
+   */
+  consumedUserId?: string;
+  consumedAt?: string;
+}
+
+/**
+ * Ficha laboral del trabajador con datos sensibles (PII). Vive en
+ * `RRHH_TABLE_NAME`, separada de la cuenta de socio en la tabla de usuarios.
+ *  - `PK = "WORKER#<userId>"`, `SK = "PROFILE"`.
+ *  - GSI3 `by-status`: `GSI3PK = "WORKERS"`,
+ *    `GSI3SK = "<nameLower>#<userId>"` para listar el personal ordenado.
+ *
+ * `userId` referencia al `UserRecord` (que tiene `isWorker: true`). Los
+ * campos `nameSnapshot`/`emailSnapshot` se denormalizan para listar sin
+ * leer la tabla de usuarios.
+ */
+export interface RrhhWorkerProfileRecord {
+  PK: `WORKER#${string}`;
+  SK: "PROFILE";
+  GSI3PK?: "WORKERS";
+  GSI3SK?: string;
+  entityType: "RRHH_WORKER_PROFILE";
+  userId: string;
+  nameSnapshot: string;
+  emailSnapshot: string;
+  /** Documento de identidad (DNI/NIE). */
+  dni: string;
+  /** Número de la Seguridad Social. */
+  socialSecurityNumber: string;
+  /** Cuenta bancaria para la nómina. */
+  iban: string;
+  address: string;
+  city: string;
+  postalCode: string;
+  /** Puesto/categoría (opcional, lo fija RRHH si procede). */
+  position?: string;
+  /**
+   * Si `false`, el trabajador está dado de baja en RRHH y no aparece para
+   * planificar turnos. Ausente se interpreta como activo (compatibilidad).
+   */
+  active?: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Cara del documento de identidad. */
+export type RrhhDocumentSide = "front" | "back";
+
+/** Tipo de documento contemplado en esta fase. */
+export type RrhhDocumentKind = "dni";
+
+/**
+ * Metadatos de un documento del trabajador. El binario vive en el bucket
+ * privado `RRHH_DOCS_S3_BUCKET` y SOLO se sirve por proxy con permiso de
+ * gestión. Aquí no se guarda el contenido, solo la referencia `s3Key`.
+ *  - `PK = "WORKER#<userId>"`, `SK = "DOC#<docId>"`.
+ */
+export interface RrhhWorkerDocumentRecord {
+  PK: `WORKER#${string}`;
+  SK: `DOC#${string}`;
+  entityType: "RRHH_WORKER_DOCUMENT";
+  docId: string;
+  userId: string;
+  kind: RrhhDocumentKind;
+  side: RrhhDocumentSide;
+  s3Key: string;
+  contentType: string;
+  size: number;
+  originalName?: string;
+  /** Origen de la subida: alta del propio trabajador o gestor de RRHH. */
+  source: "onboarding" | "staff";
+  /** Id del usuario que subió el documento (trabajador o gestor). */
+  uploadedByUserId: string;
+  uploadedAt: string;
+}
+
+/**
+ * Registro de auditoría de accesos a datos sensibles / documentos. Permite
+ * saber quién consultó o modificó la información protegida de un trabajador.
+ *  - `PK = "WORKER#<userId>"`, `SK = "AUDIT#<isoTimestamp>#<rand>"`.
+ */
+export interface RrhhAccessLogRecord {
+  PK: `WORKER#${string}`;
+  SK: `AUDIT#${string}`;
+  entityType: "RRHH_ACCESS_LOG";
+  userId: string;
+  action:
+    | "view_profile"
+    | "create_profile"
+    | "edit_profile"
+    | "view_document"
+    | "upload_document"
+    | "delete_document";
+  actorUserId: string;
+  at: string;
+  docId?: string;
+}
+
+/**
+ * Turno planificado de un trabajador dentro de una jornada (día lógico).
+ *  - `PK = "WORKER#<userId>"`, `SK = "SHIFT#<jornadaDate>#<shiftId>"`.
+ *
+ * `start`/`end` son horas de pared (`HH:mm`) locales. Si `end <= start` el
+ * turno termina en el día natural siguiente (`endsNextDay`). La jornada a la
+ * que pertenece la fija el planificador (`jornadaDate`), independientemente
+ * del corte horario usado para los fichajes.
+ */
+export interface RrhhShiftRecord {
+  PK: `WORKER#${string}`;
+  SK: `SHIFT#${string}`;
+  entityType: "RRHH_SHIFT";
+  shiftId: string;
+  userId: string;
+  workerNameSnapshot: string;
+  /** Día lógico al que pertenece el turno (`yyyy-MM-dd`). */
+  jornadaDate: string;
+  /** Hora de inicio local `HH:mm`. */
+  start: string;
+  /** Hora de fin local `HH:mm`. */
+  end: string;
+  /** `true` si el turno cruza medianoche (termina al día siguiente). */
+  endsNextDay: boolean;
+  note?: string;
+  createdByUserId: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * Configuración del módulo RRHH (singleton).
+ *  - `PK = "CONFIG"`, `SK = "RRHH"`.
+ */
+export interface RrhhConfigRecord {
+  PK: "CONFIG";
+  SK: "RRHH";
+  entityType: "RRHH_CONFIG";
+  /** Hora de corte de jornada (0–23). Lo anterior cuenta como la jornada previa. */
+  jornadaStartHour: number;
+  /** Tolerancia (minutos) para considerar un fichaje «OK» respecto al turno. */
+  toleranceMin: number;
+  timezone: string;
+  updatedAt: string;
+  updatedByUserId?: string;
+}
+
+/**
+ * Catálogo de puestos de trabajo (singleton), con su color pastel asociado
+ * para los badges del cuadrante.
+ *  - `PK = "CONFIG"`, `SK = "POSITIONS"`.
+ */
+export interface RrhhPositionsRecord {
+  PK: "CONFIG";
+  SK: "POSITIONS";
+  entityType: "RRHH_POSITIONS";
+  positions: { name: string; color: string }[];
+  updatedAt: string;
+  updatedByUserId?: string;
+}
+
+/**
+ * Fichaje de un trabajador (par entrada/salida). Se abre al fichar la entrada
+ * y se cierra al fichar la salida (con comentario opcional de incidencia).
+ *  - `PK = "WORKER#<userId>"`, `SK = "CLOCK#<clockInAt>#<clockId>"`.
+ *
+ * `jornadaDate` se calcula al fichar la entrada según la hora de corte, para
+ * poder comparar con el cuadrante aunque el turno cruce medianoche.
+ */
+export interface RrhhClockRecord {
+  PK: `WORKER#${string}`;
+  SK: `CLOCK#${string}`;
+  entityType: "RRHH_CLOCK";
+  clockId: string;
+  userId: string;
+  workerNameSnapshot: string;
+  /** Instante de entrada (ISO/UTC). */
+  clockInAt: string;
+  /** Instante de salida (ISO/UTC); ausente mientras el fichaje está abierto. */
+  clockOutAt?: string;
+  /** Jornada lógica (`yyyy-MM-dd`) calculada al fichar la entrada. */
+  jornadaDate: string;
+  /** Comentario de incidencia introducido al fichar la salida. */
+  outComment?: string;
+  /**
+   * `true` si la salida la cerró el sistema automáticamente al llegar la hora
+   * límite de la jornada (el trabajador no gestionó su salida).
+   */
+  autoClosed?: boolean;
+  createdAt: string;
+  updatedAt: string;
 }

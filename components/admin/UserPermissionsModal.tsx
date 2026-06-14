@@ -23,6 +23,9 @@ export type UserPermissionsPayload = {
   canDeactivateSocios: boolean;
   canAccessAdminReservas: boolean;
   canAccessAdminProgramacion: boolean;
+  canAccessAdminRrhh: boolean;
+  canManageRrhh: boolean;
+  isWorker: boolean;
 };
 
 const ALL_OFF: UserPermissionsPayload = {
@@ -43,6 +46,9 @@ const ALL_OFF: UserPermissionsPayload = {
   canDeactivateSocios: false,
   canAccessAdminReservas: false,
   canAccessAdminProgramacion: false,
+  canAccessAdminRrhh: false,
+  canManageRrhh: false,
+  isWorker: false,
 };
 
 export function userToPermissionsPayload(u: SafeUser): UserPermissionsPayload {
@@ -64,6 +70,9 @@ export function userToPermissionsPayload(u: SafeUser): UserPermissionsPayload {
     canDeactivateSocios: u.canDeactivateSocios === true,
     canAccessAdminReservas: u.canAccessAdminReservas === true,
     canAccessAdminProgramacion: u.canAccessAdminProgramacion === true,
+    canAccessAdminRrhh: u.canAccessAdminRrhh === true,
+    canManageRrhh: u.canManageRrhh === true,
+    isWorker: u.isWorker === true,
   };
 }
 
@@ -106,6 +115,18 @@ const ROW_META: Record<
   canAccessAdminProgramacion: {
     label: "Acceso a Administración · Programación",
     hint: "Crea y edita los eventos del feed.",
+  },
+  canAccessAdminRrhh: {
+    label: "Acceso a Administración · RRHH",
+    hint: "Entra a /admin/rrhh (fichas de trabajadores, cuadrantes y fichajes) en modo lectura.",
+  },
+  canManageRrhh: {
+    label: "Gestionar RRHH",
+    hint: "Editar fichas (incluidos datos sensibles), crear cuadrantes y corregir fichajes. Implica el acceso de lectura.",
+  },
+  isWorker: {
+    label: "Es trabajador",
+    hint: "Marca la cuenta como trabajador del local: puede ver su cuadrante y mostrar su QR de fichaje. No da acceso al panel.",
   },
   canValidatePrizes: {
     label: "Validador de canjes (taquilla)",
@@ -187,6 +208,12 @@ const PERMISSION_SECTIONS: {
       "canWriteReservationNotes",
     ],
   },
+  {
+    id: "rrhh",
+    title: "RRHH",
+    subtitle: "Fichas de trabajadores, cuadrantes y fichajes",
+    keys: ["canAccessAdminRrhh", "canManageRrhh", "isWorker"],
+  },
 ];
 
 type Props = {
@@ -201,6 +228,7 @@ export function UserPermissionsModal({ user, onClose, onSaved }: Props) {
   );
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
 
   useEffect(() => {
     setForm(userToPermissionsPayload(user));
@@ -208,6 +236,20 @@ export function UserPermissionsModal({ user, onClose, onSaved }: Props) {
   }, [user]);
 
   const active = user.status === "active";
+
+  const q = query.trim().toLowerCase();
+  const filteredSections = q
+    ? PERMISSION_SECTIONS.map((section) => ({
+        ...section,
+        keys: section.keys.filter((key) => {
+          const meta = ROW_META[key];
+          return (
+            meta.label.toLowerCase().includes(q) ||
+            meta.hint.toLowerCase().includes(q)
+          );
+        }),
+      })).filter((section) => section.keys.length > 0)
+    : PERMISSION_SECTIONS;
 
   const allOn = useCallback(
     (): UserPermissionsPayload => ({
@@ -228,6 +270,9 @@ export function UserPermissionsModal({ user, onClose, onSaved }: Props) {
       canDeactivateSocios: true,
       canAccessAdminReservas: true,
       canAccessAdminProgramacion: true,
+      canAccessAdminRrhh: true,
+      canManageRrhh: true,
+      isWorker: true,
     }),
     [active],
   );
@@ -367,6 +412,15 @@ export function UserPermissionsModal({ user, onClose, onSaved }: Props) {
         </header>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+          <div className="mb-3">
+            <input
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Buscar permiso…"
+              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none ring-brand focus:ring-2"
+            />
+          </div>
           <p className="mb-3 text-xs leading-snug text-muted">
             Cada permiso es independiente. <strong>Acceso al panel</strong> da
             entrada al hub; los flags por sección abren cada apartado.{" "}
@@ -376,7 +430,13 @@ export function UserPermissionsModal({ user, onClose, onSaved }: Props) {
             <strong>activos</strong>; configurar la ruleta es independiente.
           </p>
 
-          {PERMISSION_SECTIONS.map((section) => {
+          {filteredSections.length === 0 ? (
+            <p className="py-6 text-center text-sm text-muted">
+              No hay permisos que coincidan con “{query}”.
+            </p>
+          ) : null}
+
+          {filteredSections.map((section) => {
             return (
               <section key={section.id} className="mb-4 last:mb-0">
                 <div className="mb-2 flex flex-col gap-1.5 sm:flex-row sm:items-end sm:justify-between">

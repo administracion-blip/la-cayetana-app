@@ -5,6 +5,10 @@ import {
   getUserById,
   updateUserFieldsById,
 } from "@/lib/repositories/users";
+import {
+  createWorkerProfile,
+  getWorkerProfile,
+} from "@/lib/repositories/rrhh";
 
 const bodySchema = z.object({
   canValidatePrizes: z.boolean(),
@@ -21,6 +25,9 @@ const bodySchema = z.object({
   canManageSociosActions: z.boolean(),
   canAccessAdminReservas: z.boolean(),
   canAccessAdminProgramacion: z.boolean(),
+  canAccessAdminRrhh: z.boolean(),
+  canManageRrhh: z.boolean(),
+  isWorker: z.boolean(),
   canInviteSocios: z.boolean(),
   canEditSociosProfile: z.boolean(),
   canDeactivateSocios: z.boolean(),
@@ -101,12 +108,44 @@ export async function POST(
     canManageSociosActions: b.canManageSociosActions,
     canAccessAdminReservas: b.canAccessAdminReservas,
     canAccessAdminProgramacion: b.canAccessAdminProgramacion,
+    canAccessAdminRrhh: b.canAccessAdminRrhh,
+    canManageRrhh: b.canManageRrhh,
+    isWorker: b.isWorker,
     canInviteSocios: b.canInviteSocios,
     canEditSociosProfile: b.canEditSociosProfile,
     canDeactivateSocios: b.canDeactivateSocios,
   });
 
+  // Al marcar `isWorker`, crea su ficha laboral si aún no existe para que
+  // aparezca en Trabajadores y Cuadrantes. Los datos sensibles quedan vacíos
+  // hasta que un gestor los complete con "Editar". Best-effort: no bloquea el
+  // guardado de permisos si RRHH no está configurado.
+  let workerProfileWarning: string | undefined;
+  if (b.isWorker) {
+    try {
+      const existing = await getWorkerProfile(id);
+      if (!existing) {
+        await createWorkerProfile({
+          userId: id,
+          nameSnapshot: target.name,
+          emailSnapshot: target.email,
+          dni: "",
+          socialSecurityNumber: "",
+          iban: "",
+          address: "",
+          city: "",
+          postalCode: "",
+        });
+      }
+    } catch (err) {
+      console.error("[rrhh] no se pudo crear la ficha al marcar isWorker", err);
+      workerProfileWarning =
+        "Permisos guardados, pero no se pudo crear la ficha de trabajador. Créala desde el listado de socios (botón Trabajador).";
+    }
+  }
+
   return NextResponse.json({
+    warning: workerProfileWarning,
     ok: true,
     user: {
       id,
@@ -124,6 +163,9 @@ export async function POST(
       canManageSociosActions: b.canManageSociosActions,
       canAccessAdminReservas: b.canAccessAdminReservas,
       canAccessAdminProgramacion: b.canAccessAdminProgramacion,
+      canAccessAdminRrhh: b.canAccessAdminRrhh,
+      canManageRrhh: b.canManageRrhh,
+      isWorker: b.isWorker,
       canInviteSocios: b.canInviteSocios,
       canEditSociosProfile: b.canEditSociosProfile,
       canDeactivateSocios: b.canDeactivateSocios,

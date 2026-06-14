@@ -164,3 +164,19 @@ export function formatHhMm(minutes: number): string {
   const m = ((minutes % (24 * 60)) + 24 * 60) % (24 * 60);
   return `${pad2(Math.floor(m / 60))}:${pad2(m % 60)}`;
 }
+
+/**
+ * Devuelve la jornada (`yyyy-MM-dd`) a la que pertenece un instante según una
+ * hora de corte local. Lo anterior a `cutoffHour` cuenta como la jornada del
+ * día previo (p. ej. con corte a las 6:00, fichar a las 2:00 pertenece a la
+ * jornada de ayer). Misma lógica que el ciclo de la ruleta.
+ */
+export function computeJornadaDate(
+  date: Date,
+  cutoffHour: number,
+  timeZone: string = DEFAULT_TIMEZONE,
+): string {
+  const p = getZonedParts(date, timeZone);
+  const dateStr = `${p.year}-${pad2(p.month)}-${pad2(p.day)}`;
+  return p.hour < cutoffHour ? addDays(dateStr, -1) : dateStr;
+}

@@ -96,6 +96,18 @@ export function userCanAccessAdminProgramacionSection(
   return user.isAdmin === true || user.canAccessAdminProgramacion === true;
 }
 
+export function userCanAccessAdminRrhhSection(user: UserRecord): boolean {
+  return (
+    user.isAdmin === true ||
+    user.canAccessAdminRrhh === true ||
+    user.canManageRrhh === true
+  );
+}
+
+export function userCanManageRrhh(user: UserRecord): boolean {
+  return user.isAdmin === true || user.canManageRrhh === true;
+}
+
 /**
  * Hub `/admin`: hay que tener la puerta abierta o, al menos, una sección a la
  * que entrar. Así el flag `canAccessAdmin` permite ver el hub aunque luego
@@ -107,6 +119,7 @@ export function userCanAccessAdminArea(user: UserRecord): boolean {
     userCanAccessAdminSociosSection(user) ||
     userCanAccessAdminReservasSection(user) ||
     userCanAccessAdminProgramacionSection(user) ||
+    userCanAccessAdminRrhhSection(user) ||
     userCanManageRouletteConfig(user) ||
     userCanViewRouletteOps(user)
   );
@@ -165,6 +178,14 @@ export async function getAdminProgramacionUserOrRedirect(): Promise<UserRecord> 
   );
 }
 
+/**
+ * Páginas de RRHH (`/admin/rrhh`): requiere acceso a la sección (lectura).
+ * Las mutaciones se comprueban aparte con `requireRrhhManageForApi`.
+ */
+export async function getAdminRrhhUserOrRedirect(): Promise<UserRecord> {
+  return loadSessionUserOrRedirect(userCanAccessAdminRrhhSection, "/admin");
+}
+
 /** Página `/admin/roulette/config`: solo super-admins de ruleta. */
 export async function getRouletteAdminUserOrRedirect(): Promise<UserRecord> {
   return loadSessionUserOrRedirect(userCanManageRouletteConfig, "/admin");
@@ -190,6 +211,27 @@ export async function requireProgramacionAdminForApi(): Promise<
   { ok: true; user: UserRecord } | { ok: false; response: NextResponse }
 > {
   return loadSessionUserOr401Or403(userCanAccessAdminProgramacionSection);
+}
+
+/** API: lectura del panel de RRHH (fichas, cuadrantes, fichajes). */
+export async function requireRrhhViewForApi(): Promise<
+  { ok: true; user: UserRecord } | { ok: false; response: NextResponse }
+> {
+  return loadSessionUserOr401Or403(userCanAccessAdminRrhhSection);
+}
+
+/** API: gestión de RRHH (editar fichas/datos sensibles, cuadrantes, fichajes). */
+export async function requireRrhhManageForApi(): Promise<
+  { ok: true; user: UserRecord } | { ok: false; response: NextResponse }
+> {
+  return loadSessionUserOr401Or403(userCanManageRrhh);
+}
+
+/** API: trabajador autenticado (para fichar entrada/salida). */
+export async function requireWorkerForApi(): Promise<
+  { ok: true; user: UserRecord } | { ok: false; response: NextResponse }
+> {
+  return loadSessionUserOr401Or403((u) => u.isWorker === true);
 }
 
 /** API: edición de permisos de socios. */

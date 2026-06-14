@@ -1013,6 +1013,9 @@ export type AdminUserPatch = {
   canManageSociosActions?: boolean;
   canAccessAdminReservas?: boolean;
   canAccessAdminProgramacion?: boolean;
+  canAccessAdminRrhh?: boolean;
+  canManageRrhh?: boolean;
+  isWorker?: boolean;
   canInviteSocios?: boolean;
   canEditSociosProfile?: boolean;
   canDeactivateSocios?: boolean;
@@ -1165,7 +1168,10 @@ export async function updateUserFieldsById(
     | "canAccessAdminSocios"
     | "canManageSociosActions"
     | "canAccessAdminReservas"
-    | "canAccessAdminProgramacion";
+    | "canAccessAdminProgramacion"
+    | "canAccessAdminRrhh"
+    | "canManageRrhh"
+    | "isWorker";
   const sectionAccess = (attr: SectionAccessKey) => {
     const v = patch[attr];
     if (v === undefined) return;
@@ -1183,6 +1189,9 @@ export async function updateUserFieldsById(
   sectionAccess("canManageSociosActions");
   sectionAccess("canAccessAdminReservas");
   sectionAccess("canAccessAdminProgramacion");
+  sectionAccess("canAccessAdminRrhh");
+  sectionAccess("canManageRrhh");
+  sectionAccess("isWorker");
 
   type SociosManagementKey =
     | "canInviteSocios"
@@ -1349,6 +1358,8 @@ export type CreateInvitedUserInput = {
   birthYear: number;
   /** Id del admin que envió la invitación (auditoría). */
   invitedByUserId: string;
+  /** Si `true`, marca la cuenta como trabajador del local (`isWorker`). */
+  asWorker?: boolean;
 };
 
 /**
@@ -1436,6 +1447,7 @@ export async function createInvitedUser(
     isAdmin: false,
     activatedAt: nowIso,
     activatedByUserId: input.invitedByUserId,
+    ...(input.asWorker ? { isWorker: true } : {}),
   };
 
   try {

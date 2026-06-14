@@ -36,6 +36,24 @@ const schema = z.object({
    * Opcional hasta PR2 (ver `RESERVATIONS_TABLE_NAME`).
    */
   RESERVATION_DOCS_S3_BUCKET: z.string().min(1).optional(),
+  /**
+   * Tabla DynamoDB single-table del módulo de RRHH (WORKER_PROFILE, FORM_TOKEN,
+   * DOCUMENT, SCHEDULE, SHIFT, CLOCK_EVENT, QR_NONCE, CONFIG). PK/SK string.
+   * GSIs esperadas:
+   *  - `by-worker`  (GSI1PK + GSI1SK)   · turnos/fichajes por trabajador
+   *  - `by-date`    (GSI2PK + GSI2SK)   · cuadrante/fichajes por jornada
+   *  - `by-status`  (GSI3PK + GSI3SK)   · fichas/fichajes por estado
+   *
+   * Opcional hasta que el módulo de RRHH se cablee. Los repos que la usen
+   * deben llamar a `requireRrhhEnv()` para obtener un error claro si falta.
+   */
+  RRHH_TABLE_NAME: z.string().min(1).optional(),
+  /**
+   * Bucket S3 privado para documentos de RRHH (contrato, DNI escaneado…).
+   * Contiene PII sensible: se sirve siempre por proxy con permiso, nunca
+   * como URL pública. Opcional hasta que el módulo se cablee.
+   */
+  RRHH_DOCS_S3_BUCKET: z.string().min(1).optional(),
   STRIPE_SECRET_KEY: z.string().min(1),
   /**
    * Secreto del webhook de Stripe. OPCIONAL en el flujo manual actual:
@@ -161,5 +179,26 @@ export function requireReservationsEnv(): {
   return {
     RESERVATIONS_TABLE_NAME: env.RESERVATIONS_TABLE_NAME,
     RESERVATION_DOCS_S3_BUCKET: env.RESERVATION_DOCS_S3_BUCKET,
+  };
+}
+
+/**
+ * Devuelve las envs del módulo de RRHH o lanza un error claro si no están
+ * definidas. Usar desde repos/routes de RRHH para no depender del `throw`
+ * genérico de Zod.
+ */
+export function requireRrhhEnv(): {
+  RRHH_TABLE_NAME: string;
+  RRHH_DOCS_S3_BUCKET: string;
+} {
+  const env = getEnv();
+  if (!env.RRHH_TABLE_NAME || !env.RRHH_DOCS_S3_BUCKET) {
+    throw new Error(
+      "El módulo de RRHH no está configurado: define RRHH_TABLE_NAME y RRHH_DOCS_S3_BUCKET en tu entorno.",
+    );
+  }
+  return {
+    RRHH_TABLE_NAME: env.RRHH_TABLE_NAME,
+    RRHH_DOCS_S3_BUCKET: env.RRHH_DOCS_S3_BUCKET,
   };
 }

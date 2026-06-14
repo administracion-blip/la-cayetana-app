@@ -20,6 +20,7 @@ import type { UserRecord } from "@/types/models";
 import { ActivateUserDialog } from "./ActivateUserDialog";
 import { AdminAuthDeniedDialog } from "./AdminAuthDeniedDialog";
 import { AdminConfirmDialog } from "./AdminConfirmDialog";
+import { ConvertToWorkerModal } from "./ConvertToWorkerModal";
 import { EditUserProfileModal } from "./EditUserProfileModal";
 import { InviteMemberModal } from "./InviteMemberModal";
 import { QrScannerModal } from "./QrScannerModal";
@@ -167,6 +168,8 @@ function permissionScore(u: SafeUser): number {
   if (u.canManageSociosActions) n++;
   if (u.canAccessAdminReservas) n++;
   if (u.canAccessAdminProgramacion) n++;
+  if (u.canAccessAdminRrhh) n++;
+  if (u.canManageRrhh) n++;
   if (u.canValidatePrizes) n++;
   if (u.canEditRouletteConfig) n++;
   if (u.canViewRouletteOps) n++;
@@ -257,6 +260,8 @@ export function AdminUsersClient({
     currentUser.isAdmin === true || currentUser.canEditSociosProfile === true;
   const canDeactivate =
     currentUser.isAdmin === true || currentUser.canDeactivateSocios === true;
+  const canManageRrhh =
+    currentUser.isAdmin === true || currentUser.canManageRrhh === true;
 
   const [q, setQ] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("membershipId");
@@ -284,6 +289,9 @@ export function AdminUsersClient({
   );
   const [permissionsUser, setPermissionsUser] = useState<SafeUser | null>(null);
   const [editProfileUser, setEditProfileUser] = useState<SafeUser | null>(null);
+  const [convertWorkerUser, setConvertWorkerUser] = useState<SafeUser | null>(
+    null,
+  );
   const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteFeedback, setInviteFeedback] = useState<InviteFeedback>(null);
   const selectAllCheckboxRef = useRef<HTMLInputElement>(null);
@@ -292,12 +300,17 @@ export function AdminUsersClient({
     () =>
       COLUMNS.filter((c) => {
         if (c.key === "permissions" && !canEditPermissionsUI) return false;
-        if (c.key === "userActions" && !canEditProfile && !canDeactivate) {
+        if (
+          c.key === "userActions" &&
+          !canEditProfile &&
+          !canDeactivate &&
+          !canManageRrhh
+        ) {
           return false;
         }
         return true;
       }),
-    [canEditPermissionsUI, canEditProfile, canDeactivate],
+    [canEditPermissionsUI, canEditProfile, canDeactivate, canManageRrhh],
   );
 
   const sortColumnLabel = useMemo(
@@ -1069,7 +1082,7 @@ export function AdminUsersClient({
         );
       }
       case "userActions": {
-        if (!canEditProfile && !canDeactivate) {
+        if (!canEditProfile && !canDeactivate && !canManageRrhh) {
           return <span className="text-muted">—</span>;
         }
         const busy = pendingId === u.id;
@@ -1085,6 +1098,17 @@ export function AdminUsersClient({
                 title="Editar nombre, teléfono, sexo y año de nacimiento"
               >
                 Ficha
+              </button>
+            ) : null}
+            {canManageRrhh && u.isWorker === true ? (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => setConvertWorkerUser(u)}
+                className="rounded border border-border bg-white px-1.5 py-0.5 text-[10px] font-medium leading-tight text-foreground hover:bg-zinc-50 disabled:opacity-50"
+                title="Rellenar la ficha laboral (datos sensibles)"
+              >
+                Trabajador
               </button>
             ) : null}
             {canDeactivate && !isInactive ? (
@@ -1484,7 +1508,7 @@ export function AdminUsersClient({
                 Editar permisos
               </button>
             ) : null}
-            {canEditProfile || canDeactivate ? (
+            {canEditProfile || canDeactivate || canManageRrhh ? (
               <div className="mt-2 flex flex-wrap gap-2">
                 {canEditProfile ? (
                   <button
@@ -1493,6 +1517,15 @@ export function AdminUsersClient({
                     className="flex-1 rounded-xl border border-border bg-white py-2 text-xs font-medium text-foreground hover:bg-zinc-50"
                   >
                     Editar ficha
+                  </button>
+                ) : null}
+                {canManageRrhh && u.isWorker === true ? (
+                  <button
+                    type="button"
+                    onClick={() => setConvertWorkerUser(u)}
+                    className="flex-1 rounded-xl border border-border bg-white py-2 text-xs font-medium text-foreground hover:bg-zinc-50"
+                  >
+                    Datos trabajador
                   </button>
                 ) : null}
                 {canDeactivate && u.status !== "inactive" ? (
@@ -1846,6 +1879,23 @@ export function AdminUsersClient({
               );
             });
             setEditProfileUser(null);
+          }}
+        />
+      ) : null}
+
+      {convertWorkerUser && canManageRrhh ? (
+        <ConvertToWorkerModal
+          user={convertWorkerUser}
+          onClose={() => setConvertWorkerUser(null)}
+          onConverted={(userId) => {
+            startTransition(() => {
+              setRows((prev) =>
+                prev.map((row) =>
+                  row.id === userId ? { ...row, isWorker: true } : row,
+                ),
+              );
+            });
+            setConvertWorkerUser(null);
           }}
         />
       ) : null}
