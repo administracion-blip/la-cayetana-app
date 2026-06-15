@@ -18,6 +18,7 @@ import {
 } from "@/lib/datetime";
 
 export type CompareShift = {
+  shiftId?: string | null;
   start: string;
   end: string;
   endsNextDay: boolean;
@@ -92,14 +93,40 @@ function shiftDurationMin(s: CompareShift): number {
   return b > a ? b - a : b - a + 24 * 60;
 }
 
-function plannedStartDt(jornadaDate: string, s: CompareShift, tz: string): Date {
-  const [y, m, d] = ymd(jornadaDate);
+/**
+ * Día civil del inicio del turno respetando el corte de jornada: una hora
+ * anterior a `cutoffHour` pertenece al día civil siguiente al `jornadaDate`
+ * (igual que `computeJornadaDate` mapea los fichajes a su jornada lógica).
+ */
+function startDayOffset(s: CompareShift, cutoffHour: number): number {
+  const startMin = parseHhMm(s.start) ?? 0;
+  return startMin < cutoffHour * 60 ? 1 : 0;
+}
+
+function plannedStartDt(
+  jornadaDate: string,
+  s: CompareShift,
+  cutoffHour: number,
+  tz: string,
+): Date {
+  const base = addDays(jornadaDate, startDayOffset(s, cutoffHour));
+  const [y, m, d] = ymd(base);
   const min = parseHhMm(s.start) ?? 0;
   return zonedWallTimeToUtc(y, m, d, Math.floor(min / 60), min % 60, 0, 0, tz);
 }
 
-function plannedEndDt(jornadaDate: string, s: CompareShift, tz: string): Date {
-  const base = s.endsNextDay ? addDays(jornadaDate, 1) : jornadaDate;
+function plannedEndDt(
+  jornadaDate: string,
+  s: CompareShift,
+  cutoffHour: number,
+  tz: string,
+): Date {
+  // El fin se calcula relativo al día del inicio (+1 si cruza medianoche),
+  // no por su propia hora, para que un fin a la hora de corte no se desplace.
+  const base = addDays(
+    jornadaDate,
+    startDayOffset(s, cutoffHour) + (s.endsNextDay ? 1 : 0),
+  );
   const [y, m, d] = ymd(base);
   const min = parseHhMm(s.end) ?? 0;
   return zonedWallTimeToUtc(y, m, d, Math.floor(min / 60), min % 60, 0, 0, tz);
@@ -157,8 +184,8 @@ function buildCell(
   let plannedEndShift: CompareShift | null = null;
   for (const s of shifts) {
     base.plannedMin += shiftDurationMin(s);
-    const sd = plannedStartDt(jornadaDate, s, tz);
-    const ed = plannedEndDt(jornadaDate, s, tz);
+    const sd = plannedStartDt(jornadaDate, s, jornadaStartHour, tz);
+    const ed = plannedEndDt(jornadaDate, s, jornadaStartHour, tz);
     if (!plannedStartDtVal || sd < plannedStartDtVal) {
       plannedStartDtVal = sd;
       base.plannedStart = s.start;

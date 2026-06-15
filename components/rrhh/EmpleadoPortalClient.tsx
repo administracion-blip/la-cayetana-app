@@ -74,6 +74,15 @@ function fmtHM(min: number): string {
   return `${h}h${m > 0 ? ` ${m}m` : ""}`;
 }
 
+/** Formatea una desviación en minutos como "1h 30m" / "45m" (sin signo). */
+function fmtMin(min: number): string {
+  const abs = Math.abs(min);
+  const h = Math.floor(abs / 60);
+  const m = abs % 60;
+  if (h === 0) return `${m}m`;
+  return m > 0 ? `${h}h ${m}m` : `${h}h`;
+}
+
 const STATUS_CELL: Record<Cell["status"], string> = {
   none: "border-dashed border-border",
   ok: "border-emerald-200 bg-emerald-50",
@@ -98,13 +107,13 @@ function cellChips(c: Cell): { text: string; tone: string }[] {
   if (c.autoClosed)
     chips.push({ text: "Salida no gestionada", tone: "bg-red-100 text-red-700" });
   if (c.flags.late && c.lateInMin !== null)
-    chips.push({ text: `+${c.lateInMin}′ tarde`, tone: AMBER });
+    chips.push({ text: `+${fmtMin(c.lateInMin)} tarde`, tone: AMBER });
   if (c.flags.earlyIn && c.lateInMin !== null)
-    chips.push({ text: `${Math.abs(c.lateInMin)}′ antes (ent.)`, tone: AMBER });
+    chips.push({ text: `${fmtMin(c.lateInMin)} antes (ent.)`, tone: AMBER });
   if (c.flags.earlyOut && c.earlyOutMin !== null)
-    chips.push({ text: `−${c.earlyOutMin}′ antes`, tone: AMBER });
+    chips.push({ text: `−${fmtMin(c.earlyOutMin)} antes`, tone: AMBER });
   if (c.flags.lateOut && c.earlyOutMin !== null)
-    chips.push({ text: `+${Math.abs(c.earlyOutMin)}′ se pasó`, tone: AMBER });
+    chips.push({ text: `+${fmtMin(c.earlyOutMin)} se pasó`, tone: AMBER });
   if (c.flags.overtime) chips.push({ text: "Exceso", tone: AMBER });
   if (c.open) chips.push({ text: "Abierto", tone: "bg-brand/15 text-brand" });
   if (chips.length === 0 && c.status === "ok")

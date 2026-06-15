@@ -25,6 +25,16 @@ function fmtTime(iso: string): string {
   }
 }
 
+function fmtDuration(fromIso: string): string {
+  const mins = Math.max(
+    0,
+    Math.floor((Date.now() - new Date(fromIso).getTime()) / 60000),
+  );
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return `${h}h${m > 0 ? ` ${m}m` : ""}`;
+}
+
 export function FicharClient({ token, workerName }: Props) {
   const [status, setStatus] = useState<StatusState>({ phase: "loading" });
   const [comment, setComment] = useState("");
@@ -155,7 +165,12 @@ export function FicharClient({ token, workerName }: Props) {
           <div className="rounded-xl border border-brand/30 bg-brand/5 p-3 text-center text-sm">
             Tienes un turno abierto
             {status.lastClockInAt ? (
-              <> desde las {fmtTime(status.lastClockInAt)}</>
+              <>
+                {" "}desde las {fmtTime(status.lastClockInAt)}. Llevas{" "}
+                <span className="font-semibold">
+                  {fmtDuration(status.lastClockInAt)}
+                </span>
+              </>
             ) : null}
             .
           </div>

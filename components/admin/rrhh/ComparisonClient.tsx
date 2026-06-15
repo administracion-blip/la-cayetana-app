@@ -35,6 +35,19 @@ type Cell = {
     lateOut: boolean;
     overtime: boolean;
   };
+  shifts: {
+    shiftId?: string | null;
+    start: string;
+    end: string;
+    endsNextDay: boolean;
+    note?: string | null;
+  }[];
+  clocks: {
+    clockInAt: string;
+    clockOutAt?: string | null;
+    outComment?: string | null;
+    autoClosed?: boolean | null;
+  }[];
 };
 
 type Data = {
@@ -72,6 +85,15 @@ function fmtHM(min: number): string {
   return `${h}h${m > 0 ? ` ${m}m` : ""}`;
 }
 
+/** Formatea una desviación en minutos como "1h 30m" / "45m" (sin signo). */
+function fmtMin(min: number): string {
+  const abs = Math.abs(min);
+  const h = Math.floor(abs / 60);
+  const m = abs % 60;
+  if (h === 0) return `${m}m`;
+  return m > 0 ? `${h}h ${m}m` : `${h}h`;
+}
+
 const STATUS_CELL: Record<Cell["status"], string> = {
   none: "border-dashed border-border",
   ok: "border-emerald-200 bg-emerald-50",
@@ -96,13 +118,13 @@ function cellChips(c: Cell): { text: string; tone: string }[] {
   if (c.autoClosed)
     chips.push({ text: "Salida no gestionada", tone: "bg-red-100 text-red-700" });
   if (c.flags.late && c.lateInMin !== null)
-    chips.push({ text: `+${c.lateInMin}′ tarde`, tone: AMBER });
+    chips.push({ text: `+${fmtMin(c.lateInMin)} tarde`, tone: AMBER });
   if (c.flags.earlyIn && c.lateInMin !== null)
-    chips.push({ text: `${Math.abs(c.lateInMin)}′ antes (ent.)`, tone: AMBER });
+    chips.push({ text: `${fmtMin(c.lateInMin)} antes (ent.)`, tone: AMBER });
   if (c.flags.earlyOut && c.earlyOutMin !== null)
-    chips.push({ text: `−${c.earlyOutMin}′ antes`, tone: AMBER });
+    chips.push({ text: `−${fmtMin(c.earlyOutMin)} antes`, tone: AMBER });
   if (c.flags.lateOut && c.earlyOutMin !== null)
-    chips.push({ text: `+${Math.abs(c.earlyOutMin)}′ se pasó`, tone: AMBER });
+    chips.push({ text: `+${fmtMin(c.earlyOutMin)} se pasó`, tone: AMBER });
   if (c.flags.overtime) chips.push({ text: "Exceso", tone: AMBER });
   if (c.open) chips.push({ text: "Abierto", tone: "bg-brand/15 text-brand" });
   if (chips.length === 0 && c.status === "ok")
@@ -365,6 +387,8 @@ export function ComparisonClient({ canManage }: Props) {
         <DayDetail
           day={detailDay}
           data={data}
+          canManage={canManage}
+          onValidated={load}
           onClose={() => setDetailDay(null)}
         />
       ) : null}
@@ -442,13 +466,13 @@ function buildIncidents(
       if (c.autoClosed)
         push("Salida no gestionada", "Cierre automático a la hora límite", RED);
       if (c.flags.earlyIn && c.lateInMin !== null)
-        push("Fichaje antes de tiempo", `Entró ${Math.abs(c.lateInMin)}′ antes`, AMBER_INC);
+        push("Fichaje antes de tiempo", `Entró ${fmtMin(c.lateInMin)} antes`, AMBER_INC);
       if (c.flags.late && c.lateInMin !== null)
-        push("Entrada tarde", `Entró ${c.lateInMin}′ tarde`, AMBER_INC);
+        push("Entrada tarde", `Entró ${fmtMin(c.lateInMin)} tarde`, AMBER_INC);
       if (c.flags.earlyOut && c.earlyOutMin !== null)
-        push("Salida antes", `Salió ${c.earlyOutMin}′ antes`, AMBER_INC);
+        push("Salida antes", `Salió ${fmtMin(c.earlyOutMin)} antes`, AMBER_INC);
       if (c.flags.lateOut && c.earlyOutMin !== null)
-        push("Pasado de fichaje", `Salió ${Math.abs(c.earlyOutMin)}′ después`, AMBER_INC);
+        push("Pasado de fichaje", `Salió ${fmtMin(c.earlyOutMin)} después`, AMBER_INC);
       if (c.flags.overtime)
         push("Exceso de horas", `${fmtHM(c.workedMin)} vs ${fmtHM(c.plannedMin)} previstas`, AMBER_INC);
       if (c.status === "unplanned")
@@ -460,18 +484,95 @@ function buildIncidents(
   return out;
 }
 
+/**
+ * Determina si una celda permite "validar el fichaje" (ajustar el cuadrante a
+ * lo realmente fichado). Solo en casos inequívocos: 1 fichaje cerrado y, o bien
+ * 1 turno con desviación (ajustar), o ningún turno (crear).
+ */
+function validationFor(
+  c: Cell,
+): { mode: "adjust"; shiftId: string } | { mode: "create" } | null {
+  if (!c.actualStart || !c.actualEnd || c.open) return null;
+  if (c.clocks.length !== 1) return null;
+  if (c.shifts.length === 0) {
+    if (c.status === "unplanned") return { mode: "create" };
+    return null;
+  }
+  if (c.shifts.length === 1 && c.status === "issue") {
+    const shiftId = c.shifts[0]?.shiftId;
+    if (shiftId) return { mode: "adjust", shiftId };
+  }
+  return null;
+}
+
 function DayDetail({
   day,
   data,
+  canManage,
+  onValidated,
   onClose,
 }: {
   day: string;
   data: Data;
+  canManage: boolean;
+  onValidated: () => void | Promise<void>;
   onClose: () => void;
 }) {
+  const [confirming, setConfirming] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
   const rows = data.workers
     .map((w) => ({ worker: w, cell: data.cells[w.userId]?.[day] }))
     .filter((r) => r.cell && r.cell.status !== "none");
+
+  async function validate(userId: string, c: Cell) {
+    const v = validationFor(c);
+    if (!v || !c.actualStart || !c.actualEnd) return;
+    setBusy(userId);
+    setError(null);
+    try {
+      let res: Response;
+      if (v.mode === "adjust") {
+        res = await fetch(
+          `/api/admin/rrhh/shifts/${encodeURIComponent(v.shiftId)}?userId=${encodeURIComponent(userId)}&jornadaDate=${encodeURIComponent(day)}`,
+          {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              start: c.actualStart,
+              end: c.actualEnd,
+              note: c.shifts[0]?.note ?? undefined,
+            }),
+          },
+        );
+      } else {
+        res = await fetch("/api/admin/rrhh/shifts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            userId,
+            jornadaDate: day,
+            start: c.actualStart,
+            end: c.actualEnd,
+          }),
+        });
+      }
+      const json = (await res.json().catch(() => null)) as
+        | { ok?: boolean; error?: string }
+        | null;
+      if (!res.ok || !json?.ok) {
+        setError(json?.error ?? "No se pudo validar el fichaje");
+        return;
+      }
+      setConfirming(null);
+      await onValidated();
+    } catch {
+      setError("Error de red al validar el fichaje");
+    } finally {
+      setBusy(null);
+    }
+  }
 
   return (
     <div
@@ -492,6 +593,11 @@ function DayDetail({
             Cerrar
           </button>
         </div>
+        {error ? (
+          <p className="mb-3 text-sm text-red-600" role="alert">
+            {error}
+          </p>
+        ) : null}
         {rows.length === 0 ? (
           <p className="text-sm text-muted">
             Sin turnos ni fichajes en esta jornada.
@@ -508,11 +614,15 @@ function DayDetail({
                   <th className="px-3 py-2 font-medium">Δ sal.</th>
                   <th className="px-3 py-2 font-medium">Horas</th>
                   <th className="px-3 py-2 font-medium">Estado</th>
+                  {canManage ? (
+                    <th className="px-3 py-2 font-medium">Acción</th>
+                  ) : null}
                 </tr>
               </thead>
               <tbody>
                 {rows.map(({ worker, cell }) => {
                   const c = cell as Cell;
+                  const v = canManage ? validationFor(c) : null;
                   return (
                     <tr
                       key={worker.userId}
@@ -534,14 +644,12 @@ function DayDetail({
                       <td className="px-3 py-2">
                         {c.lateInMin === null
                           ? "—"
-                          : `${c.lateInMin > 0 ? "+" : ""}${c.lateInMin}′`}
+                          : `${c.lateInMin > 0 ? "+" : c.lateInMin < 0 ? "−" : ""}${fmtMin(c.lateInMin)}`}
                       </td>
                       <td className="px-3 py-2">
                         {c.earlyOutMin === null
                           ? "—"
-                          : `${c.earlyOutMin > 0 ? "−" : "+"}${Math.abs(
-                              c.earlyOutMin,
-                            )}′`}
+                          : `${c.earlyOutMin > 0 ? "−" : "+"}${fmtMin(c.earlyOutMin)}`}
                       </td>
                       <td className="px-3 py-2">
                         {fmtHM(c.workedMin)}
@@ -555,6 +663,48 @@ function DayDetail({
                           </div>
                         ) : null}
                       </td>
+                      {canManage ? (
+                        <td className="px-3 py-2">
+                          {v ? (
+                            confirming === worker.userId ? (
+                              <span className="flex items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  disabled={busy === worker.userId}
+                                  onClick={() => void validate(worker.userId, c)}
+                                  className="rounded-full bg-emerald-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-emerald-700 disabled:opacity-60"
+                                  title={`Ajustar a ${c.actualStart}–${c.actualEnd}`}
+                                >
+                                  {busy === worker.userId ? "…" : "Confirmar"}
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={busy === worker.userId}
+                                  onClick={() => setConfirming(null)}
+                                  className="rounded-full border border-border px-2.5 py-1 text-xs hover:bg-background disabled:opacity-60"
+                                >
+                                  No
+                                </button>
+                              </span>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setError(null);
+                                  setConfirming(worker.userId);
+                                }}
+                                className="rounded-full border border-emerald-300 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-100"
+                              >
+                                {v.mode === "create"
+                                  ? "Crear turno"
+                                  : "Validar fichaje"}
+                              </button>
+                            )
+                          ) : (
+                            <span className="text-xs text-muted">—</span>
+                          )}
+                        </td>
+                      ) : null}
                     </tr>
                   );
                 })}

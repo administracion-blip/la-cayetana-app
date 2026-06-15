@@ -76,6 +76,7 @@ export async function GET(req: Request) {
       weekStart: week,
       workers,
       shifts: shiftRecords.map((s) => ({
+        shiftId: s.shiftId,
         userId: s.userId,
         jornadaDate: s.jornadaDate,
         start: s.start,
